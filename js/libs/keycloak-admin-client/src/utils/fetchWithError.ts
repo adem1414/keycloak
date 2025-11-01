@@ -21,7 +21,24 @@ export async function fetchWithError(
 
   if (!response.ok) {
     const responseData = await parseResponse(response);
-    const message = getErrorMessage(responseData);
+    const baseMessage = getErrorMessage(responseData);
+
+    // make a concise representation of responseData for the message
+    let dataPreview: string;
+    try {
+      dataPreview = typeof responseData === "string"
+        ? responseData
+        : JSON.stringify(responseData);
+    } catch {
+      dataPreview = "[unserializable responseData]";
+    }
+
+    if (dataPreview.length > 500) {
+      dataPreview = dataPreview.slice(0, 500) + "...";
+    }
+
+    const message = `${baseMessage} (status: ${response.status}) ${dataPreview}`;
+
     throw new NetworkError(message, {
       response,
       responseData,

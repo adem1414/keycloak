@@ -10,6 +10,7 @@ import type { RoleMappingPayload } from "@keycloak/keycloak-admin-client/lib/def
 import type { UserProfileConfig } from "@keycloak/keycloak-admin-client/lib/defs/userProfileMetadata.js";
 import type UserRepresentation from "@keycloak/keycloak-admin-client/lib/defs/userRepresentation.js";
 import type { Credentials } from "@keycloak/keycloak-admin-client/lib/utils/auth.js";
+import { retry } from "./retry.ts";
 
 class AdminClient {
   readonly #client = new KeycloakAdminClient({
@@ -48,9 +49,11 @@ class AdminClient {
   async deleteRealm(realm: string) {
     await this.#login();
     const foundRealm = await this.#client.realms.findOne({ realm });
-    if (foundRealm) {
-      await this.#client.realms.del({ realm });
+    if (!foundRealm) {
+      return;
     }
+
+    await retry(() => this.#client.realms.del({ realm }));
   }
 
   async createClient(
@@ -69,7 +72,7 @@ class AdminClient {
     )[0];
 
     if (client) {
-      await this.#client.clients.del({ id: client.id! });
+      await retry(() => this.#client.clients.del({ id: client.id! }));
     }
   }
 
@@ -100,7 +103,7 @@ class AdminClient {
     await this.#login();
     const groups = await this.#client.groups.find();
     for (const group of groups) {
-      await this.#client.groups.del({ id: group.id! });
+      await retry(() => this.#client.groups.del({ id: group.id! }));
     }
   }
 
@@ -203,8 +206,7 @@ class AdminClient {
         throw new Error(`User not found: ${username}`);
       }
     }
-
-    await this.#client.users.del({ id: foundUsers[0].id!, realm });
+    await retry(() => this.#client.users.del({ id: foundUsers[0].id!, realm }));
   }
 
   async createClientScope(
@@ -334,9 +336,11 @@ class AdminClient {
 
   async deleteIdentityProvider(idpAlias: string) {
     await this.#login();
-    await this.#client.identityProviders.del({
-      alias: idpAlias,
-    });
+    await retry(() =>
+      this.#client.identityProviders.del({
+        alias: idpAlias,
+      }),
+    );
   }
 
   async addLocalizationText(
@@ -384,7 +388,9 @@ class AdminClient {
       realm,
     });
     if (found.length !== 0) {
-      await this.#client.organizations.delById({ id: found[0].id!, realm });
+      await retry(() =>
+        this.#client.organizations.delById({ id: found[0].id!, realm }),
+      );
     }
   }
 
