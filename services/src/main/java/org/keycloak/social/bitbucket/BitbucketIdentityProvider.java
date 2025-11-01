@@ -24,15 +24,16 @@ import org.keycloak.broker.oidc.OAuth2IdentityProviderConfig;
 import org.keycloak.broker.oidc.mappers.AbstractJsonUserAttributeMapper;
 import org.keycloak.broker.provider.BrokeredIdentityContext;
 import org.keycloak.broker.provider.IdentityBrokerException;
-import org.keycloak.broker.provider.util.SimpleHttp;
 import org.keycloak.broker.social.SocialIdentityProvider;
 import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventBuilder;
+import org.keycloak.http.simple.SimpleHttp;
+import org.keycloak.http.simple.SimpleHttpResponse;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.services.ErrorResponseException;
 
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response;
 import java.io.IOException;
 
 /**
@@ -72,7 +73,7 @@ public class BitbucketIdentityProvider extends AbstractOAuth2IdentityProvider im
 	@Override
 	protected BrokeredIdentityContext validateExternalTokenThroughUserInfo(EventBuilder event, String subjectToken, String subjectTokenType) {
 		event.detail("validation_method", "user info");
-		SimpleHttp.Response response = null;
+		SimpleHttpResponse response = null;
 		int status = 0;
 		try {
 			String userInfoUrl = getProfileEndpointForValidation(event);
@@ -132,19 +133,16 @@ public class BitbucketIdentityProvider extends AbstractOAuth2IdentityProvider im
 	}
 
 	private BrokeredIdentityContext extractUserInfo(String subjectToken, JsonNode profile) {
-		BrokeredIdentityContext user = new BrokeredIdentityContext(getJsonProperty(profile, "account_id"));
-
-
+		BrokeredIdentityContext user = new BrokeredIdentityContext(getJsonProperty(profile, "account_id"), getConfig());
 		String username = getJsonProperty(profile, "username");
 		user.setUsername(username);
 		user.setName(getJsonProperty(profile, "display_name"));
-		user.setIdpConfig(getConfig());
 		user.setIdp(this);
 
 		AbstractJsonUserAttributeMapper.storeUserProfileForMapper(user, profile, getConfig().getAlias());
 
 		try {
-			JsonNode emails = SimpleHttp.doGet(USER_EMAIL_URL, session).header("Authorization", "Bearer " + subjectToken).asJson();
+			JsonNode emails = SimpleHttp.create(session).doGet(USER_EMAIL_URL).header("Authorization", "Bearer " + subjectToken).asJson();
 
 			// {"pagelen":10,"values":[{"is_primary":true,"is_confirmed":true,"type":"email","email":"bburke@redhat.com","links":{"self":{"href":"https://api.bitbucket.org/2.0/user/emails/bburke@redhat.com"}}}],"page":1,"size":1}
 			JsonNode emailJson = emails.get("values");
@@ -167,7 +165,7 @@ public class BitbucketIdentityProvider extends AbstractOAuth2IdentityProvider im
 	@Override
 	protected BrokeredIdentityContext doGetFederatedIdentity(String accessToken) {
 		try {
-			JsonNode profile = SimpleHttp.doGet(USER_URL, session).header("Authorization", "Bearer " + accessToken).asJson();
+			JsonNode profile = SimpleHttp.create(session).doGet(USER_URL).header("Authorization", "Bearer " + accessToken).asJson();
 
 			String type = getJsonProperty(profile, "type");
 			if (type == null) {

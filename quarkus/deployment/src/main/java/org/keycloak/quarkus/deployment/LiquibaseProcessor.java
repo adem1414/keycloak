@@ -12,12 +12,10 @@ import java.util.Set;
 
 import io.quarkus.agroal.spi.JdbcDataSourceBuildItem;
 import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
-import liquibase.lockservice.StandardLockService;
 import org.jboss.jandex.AnnotationInstance;
 import org.jboss.jandex.ClassInfo;
 import org.jboss.jandex.DotName;
 import org.jboss.jandex.IndexView;
-import org.keycloak.config.StorageOptions;
 import org.keycloak.connections.jpa.updater.liquibase.lock.DummyLockService;
 
 import io.quarkus.deployment.annotations.BuildStep;
@@ -31,9 +29,7 @@ import liquibase.servicelocator.LiquibaseService;
 import liquibase.sqlgenerator.SqlGenerator;
 import org.keycloak.quarkus.runtime.KeycloakRecorder;
 
-import static org.keycloak.config.StorageOptions.STORAGE;
-import static org.keycloak.quarkus.runtime.configuration.Configuration.getOptionalValue;
-import static org.keycloak.quarkus.runtime.configuration.MicroProfileConfigProvider.NS_KEYCLOAK_PREFIX;
+import static org.keycloak.quarkus.deployment.KeycloakProcessor.getDefaultDataSource;
 
 class LiquibaseProcessor {
 
@@ -43,7 +39,7 @@ class LiquibaseProcessor {
         DotName liquibaseServiceName = DotName.createSimple(LiquibaseService.class.getName());
         Map<String, List<String>> services = new HashMap<>();
         IndexView index = indexBuildItem.getIndex();
-        JdbcDataSourceBuildItem dataSourceBuildItem = jdbcDataSources.get(0);
+        JdbcDataSourceBuildItem dataSourceBuildItem = getDefaultDataSource(jdbcDataSources);
         String dbKind = dataSourceBuildItem.getDbKind();
 
         for (Class<?> c : Arrays.asList(liquibase.diff.compare.DatabaseObjectComparator.class,
@@ -72,18 +68,14 @@ class LiquibaseProcessor {
                         !Modifier.isPublic(found.flags())) {
                     continue;
                 }
-                AnnotationInstance annotationInstance = found.classAnnotation(liquibaseServiceName);
+                AnnotationInstance annotationInstance = found.declaredAnnotation(liquibaseServiceName);
                 if (annotationInstance == null || !annotationInstance.value("skip").asBoolean()) {
                     impls.add(found.name().toString());
                 }
             }
         }
 
-        if (StorageOptions.StorageType.jpa.name().equals(getOptionalValue(NS_KEYCLOAK_PREFIX.concat(STORAGE.getKey())).orElse(null))) {
-            services.put(LockService.class.getName(), Collections.singletonList(StandardLockService.class.getName()));
-        } else {
-            services.put(LockService.class.getName(), Collections.singletonList(DummyLockService.class.getName()));
-        }
+        services.put(LockService.class.getName(), Collections.singletonList(DummyLockService.class.getName()));
         services.put(ChangeLogParser.class.getName(), Collections.singletonList(XMLChangeLogSAXParser.class.getName()));
 
         recorder.configureLiquibase(services);

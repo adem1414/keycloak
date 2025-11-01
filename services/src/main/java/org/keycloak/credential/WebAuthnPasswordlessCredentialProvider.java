@@ -19,8 +19,10 @@
 package org.keycloak.credential;
 
 import com.webauthn4j.converter.util.ObjectConverter;
+import org.keycloak.authentication.authenticators.browser.WebAuthnMetadataService;
 import org.keycloak.authentication.requiredactions.WebAuthnPasswordlessRegisterFactory;
 import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.WebAuthnPolicy;
 import org.keycloak.models.credential.WebAuthnCredentialModel;
 
 /**
@@ -30,8 +32,8 @@ import org.keycloak.models.credential.WebAuthnCredentialModel;
  */
 public class WebAuthnPasswordlessCredentialProvider extends WebAuthnCredentialProvider {
 
-    public WebAuthnPasswordlessCredentialProvider(KeycloakSession session, ObjectConverter objectConverter) {
-        super(session, objectConverter);
+    public WebAuthnPasswordlessCredentialProvider(KeycloakSession session, WebAuthnMetadataService metadataService, ObjectConverter objectConverter) {
+        super(session, metadataService, objectConverter);
     }
 
     @Override
@@ -50,5 +52,10 @@ public class WebAuthnPasswordlessCredentialProvider extends WebAuthnCredentialPr
                 .createAction(WebAuthnPasswordlessRegisterFactory.PROVIDER_ID)
                 .removeable(true)
                 .build(getKeycloakSession());
+    }
+
+    @Override
+    protected WebAuthnPolicy getWebAuthnPolicy() {
+        return getKeycloakSession().getContext().getRealm().getWebAuthnPolicyPasswordless();
     }
 }

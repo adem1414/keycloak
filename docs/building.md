@@ -1,26 +1,18 @@
 ## Building from source
 
-Ensure you have JDK 11 (or newer), Maven 3.5.4 (or newer) and Git installed
+Ensure you have **JDK 17** or **JDK 21** and Git installed
 
     java -version
-    mvn -version
     git --version
 
-**NOTE**
+Newer versions of the JDK are not supported. If you have multiple JDK versions
+installed, you can specify which one to use during the build by setting the `JAVA_HOME`
+environment variable (this should be the directory containing `/bin/` or `/jre/`).
 
-If you use Maven 3.8.1 or newer, please add the following mirror to your local
-`~/.m2/settings.xml` to avoid build errors:
-```
-<mirrors>
-  <mirror>
-    <id>jboss-public-repository-group-https</id>
-    <mirrorOf>jboss-public-repository-group</mirrorOf>
-    <name>Jboss public https</name>
-    <url>https://repository.jboss.org/nexus/content/groups/public/</url>
-  </mirror>
-</mirrors>
-```
-See [KEYCLOAK-17812](https://issues.redhat.com/browse/KEYCLOAK-17812) for more details.
+    JAVA_HOME=/path/to/jdk-21/ ./mvnw clean install
+
+Instead of using a locally installed Maven, call the Maven wrapper script `mvnw` in the main folder of the project.
+This will use the Maven version which is supported by this project.
 
 ---    
 First clone the Keycloak repository:
@@ -30,19 +22,19 @@ First clone the Keycloak repository:
     
 To build Keycloak run:
 
-    mvn clean install
+    ./mvnw clean install
     
-This will build all modules and run the testsuite. 
+This will build all modules and run the testsuite.
 
-To build the ZIP distribution run:
+To build Keycloak with adapters run:
 
-    mvn clean install -Pdistribution
-    
-Once completed you will find distribution archives in `distribution`.
+    ./mvnw clean install -Pdistribution
 
 To build only the server run:
 
-    mvn -Pdistribution -pl distribution/server-dist -am -Dmaven.test.skip clean install
+    ./mvnw -pl quarkus/deployment,quarkus/dist -am -DskipTests clean install
+
+You can then find the ZIP distribution in `quarkus/dist/target` folder.
 
 ---
 **NOTE**
@@ -51,26 +43,43 @@ Classes from `org.keycloak.testsuite.*` packages aren't suitable to be used in p
 
 ---
 
-### Building Quarkus Distribution
+This project contains opt-in support for incremental Maven builds using the [Apache Maven Build Cache Extension](https://github.com/apache/maven-build-cache-extension) which is disabled by default.
 
-Please, take a look at this [documentation](../quarkus/README.md).
+To enable it for a single Maven command execution, enable it as follows: 
 
-## Starting Keycloak
+    ./mvnw -D -Dmaven.build.cache.enabled=true ...
+
+To enable it by default, add it to the `MAVEN_OPTS` environment variable:
+
+    export MAVEN_OPTS="-Dmaven.build.cache.enabled=true"
+
+---
+**NOTE**
+
+To ensure that development in a branch does not break compatibility with existing releases, proto-schema-compatibility-maven-plugin checks may be run, which can cause builds to fail in proxy environments.
+To avoid this, you can skip this check by adding the following property:
+
+    -DskipProtoLock=true
+
+---
+
+### Starting Keycloak
 
 To start Keycloak during development first build as specified above, then run:
 
-    mvn -f testsuite/utils/pom.xml exec:java -Pkeycloak-server 
+    java -Dkc.config.built=true -jar quarkus/server/target/lib/quarkus-run.jar start-dev
 
-When running testsuite, by default an account with username `admin` and password `admin` will be created within the master realm at start.
-
-To start Keycloak from the server distribution first build the distribution it as specified above, then run:
-
-    tar xfz distribution/server-dist/target/keycloak-<VERSION>.tar.gz
-    cd keycloak-<VERSION>
-    bin/standalone.sh
-    
 To stop the server press `Ctrl + C`.
 
+For more details, follow the [`quarkus` module documentation](../quarkus/README.md).
+
+---
+**NOTE**
+
+Direct use of the `quarkus-run.jar` assumes manual control over the augmentation process. 
+If you want to run Keycloak with changes to build time options it is easier to either use the full distribution and the relevant `bin/kc.[sh|bat]` script or run an embedded server via the `org.keycloak.Keycloak` class in the `quarkus/tests/junit5` module.
+
+---
 
 ## Working with the codebase
 
@@ -97,6 +106,6 @@ classes. E.g. in IntelliJ IDEA use `Build â†’ Build Project` instead of `Build â
 If you are building the Operator from your IDE, make sure to build the project with the `operator` profile enabled in Maven
 as it's excluded by default:
 
-    mvn clean install -Poperator -DskipTests
+    ./mvnw clean install -Poperator -DskipTests
 
 ---

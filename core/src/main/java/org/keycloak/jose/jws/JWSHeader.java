@@ -22,9 +22,12 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.keycloak.jose.JOSEHeader;
+import org.keycloak.jose.jwk.JWK;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -44,6 +47,12 @@ public class JWSHeader implements JOSEHeader {
     @JsonProperty("kid")
     private String keyId;
 
+    @JsonProperty("jwk")
+    private JWK key;
+
+    @JsonProperty("x5c")
+    private List<String> x5c;
+
     public JWSHeader() {
     }
 
@@ -53,10 +62,11 @@ public class JWSHeader implements JOSEHeader {
         this.contentType = contentType;
     }
 
-    public JWSHeader(Algorithm algorithm, String type, String contentType, String keyId) {
+    public JWSHeader(Algorithm algorithm, String type, String keyId, JWK key) {
         this.algorithm = algorithm;
         this.type = type;
         this.keyId = keyId;
+        this.key = key;
     }
 
     public Algorithm getAlgorithm() {
@@ -79,6 +89,14 @@ public class JWSHeader implements JOSEHeader {
 
     public String getKeyId() {
         return keyId;
+    }
+
+    public JWK getKey() {
+        return key;
+    }
+
+    public List<String> getX5c() {
+        return x5c;
     }
 
     private static final ObjectMapper mapper = new ObjectMapper();

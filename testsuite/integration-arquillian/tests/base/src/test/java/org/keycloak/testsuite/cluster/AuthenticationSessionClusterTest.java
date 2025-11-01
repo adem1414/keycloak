@@ -21,25 +21,31 @@ import org.hamcrest.Matchers;
 import org.infinispan.Cache;
 import org.jboss.arquillian.graphene.page.Page;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.keycloak.connections.infinispan.InfinispanConnectionProvider;
-import org.keycloak.models.sessions.infinispan.InfinispanStickySessionEncoderProviderFactory;
 import org.keycloak.connections.infinispan.InfinispanUtil;
+import org.keycloak.models.RealmModel;
 import org.keycloak.representations.idm.RealmRepresentation;
+import org.keycloak.services.managers.AuthenticationSessionManager;
 import org.keycloak.sessions.StickySessionEncoderProvider;
+import org.keycloak.sessions.StickySessionEncoderProviderFactory;
 import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.pages.LoginPage;
 import org.keycloak.testsuite.pages.LoginPasswordUpdatePage;
 import org.keycloak.testsuite.pages.LoginUpdateProfilePage;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 
-import javax.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.core.UriBuilder;
 import java.util.HashSet;
 import java.util.Set;
 
-import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertTrue;
+import static org.keycloak.connections.infinispan.InfinispanConnectionProvider.AUTHENTICATION_SESSIONS_CACHE_NAME;
+import static org.keycloak.testsuite.AbstractAdminTest.loadJson;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -78,45 +84,39 @@ public class AuthenticationSessionClusterTest extends AbstractClusterTest {
 
 
     @Test
-    public void testAuthSessionCookieWithAttachedRoute() throws Exception {
-        // TODO Maybe add compatibility between cluster and cross-dc tests regarding route name (jboss.node.name). Cross-dc tests use arquillian container qualifier when cluster tests just 'node1' .
-//        String node1Route = backendNode(0).getArquillianContainer().getName();
-//        String node2Route = backendNode(1).getArquillianContainer().getName();
-
-        OAuthClient oAuthClient = new OAuthClient();
-        oAuthClient.init(driver);
+    public void testAuthSessionCookieWithAttachedRoute() {
+        OAuthClient oAuthClient = oauth;
         oAuthClient.baseUrl(UriBuilder.fromUri(backendNode(0).getUriBuilder().build() + "/auth").build("test").toString());
 
-        String testAppLoginNode1URL = oAuthClient.getLoginFormUrl();
+        String testAppLoginNode1URL = oAuthClient.loginForm().build();
 
         Set<String> visitedRoutes = new HashSet<>();
         for (int i = 0; i < 20; i++) {
             driver.navigate().to(testAppLoginNode1URL);
             String authSessionCookie = AuthenticationSessionFailoverClusterTest.getAuthSessionCookieValue(driver);
 
-            Assert.assertThat(authSessionCookie.length(), Matchers.greaterThan(36));
-            String route = authSessionCookie.substring(37);
+            assertNotEquals( -1, authSessionCookie.indexOf("."));
+            String route = authSessionCookie.substring(authSessionCookie.indexOf(".") + 1);
             visitedRoutes.add(route);
 
             // Drop all cookies before continue
             driver.manage().deleteAllCookies();
         }
 
-        Assert.assertThat(visitedRoutes, Matchers.containsInAnyOrder(Matchers.startsWith("node1"), Matchers.startsWith("node2")));
+        assertThat(visitedRoutes, Matchers.containsInAnyOrder(Matchers.startsWith("node1"), Matchers.startsWith("node2")));
     }
 
 
     @Test
-    public void testAuthSessionCookieWithoutRoute() throws Exception {
-        OAuthClient oAuthClient = new OAuthClient();
-        oAuthClient.init(driver);
+    public void testAuthSessionCookieWithoutRoute() {
+        OAuthClient oAuthClient = oauth;
         oAuthClient.baseUrl(UriBuilder.fromUri(backendNode(0).getUriBuilder().build() + "/auth").build("test").toString());
 
-        String testAppLoginNode1URL = oAuthClient.getLoginFormUrl();
+        String testAppLoginNode1URL = oAuthClient.loginForm().build();
 
         // Disable route on backend server
         getTestingClientFor(backendNode(0)).server().run(session -> {
-            InfinispanStickySessionEncoderProviderFactory factory = (InfinispanStickySessionEncoderProviderFactory) session.getKeycloakSessionFactory().getProviderFactory(StickySessionEncoderProvider.class, "infinispan");
+            StickySessionEncoderProviderFactory factory = (StickySessionEncoderProviderFactory) session.getKeycloakSessionFactory().getProviderFactory(StickySessionEncoderProvider.class);
             factory.setShouldAttachRoute(false);
         });
 
@@ -125,22 +125,25 @@ public class AuthenticationSessionClusterTest extends AbstractClusterTest {
             driver.navigate().to(testAppLoginNode1URL);
             String authSessionCookie = AuthenticationSessionFailoverClusterTest.getAuthSessionCookieValue(driver);
 
-            Assert.assertEquals(36, authSessionCookie.length());
+            assertEquals(-1, authSessionCookie.indexOf("."));
 
             // Drop all cookies before continue
             driver.manage().deleteAllCookies();
 
             // Check that route owner is always node1
             getTestingClientFor(backendNode(0)).server().run(session -> {
-                Cache authSessionCache = session.getProvider(InfinispanConnectionProvider.class).getCache(InfinispanConnectionProvider.AUTHENTICATION_SESSIONS_CACHE_NAME);
-                String keyOwner = InfinispanUtil.getTopologyInfo(session).getRouteName(authSessionCache, authSessionCookie);
-                Assert.assertTrue(keyOwner.startsWith("node1"));
+                RealmModel realm = session.realms().getRealmByName("test");
+                session.getContext().setRealm(realm);
+                Cache<?, ?> authSessionCache = session.getProvider(InfinispanConnectionProvider.class).getCache(AUTHENTICATION_SESSIONS_CACHE_NAME);
+                String decodedAuthSessionId = new AuthenticationSessionManager(session).decodeBase64AndValidateSignature(authSessionCookie);
+                String keyOwner = InfinispanUtil.getTopologyInfo(session).getRouteName(authSessionCache, decodedAuthSessionId);
+                assertTrue(keyOwner.startsWith("node1"));
             });
         }
 
         // Revert route on backend server
         getTestingClientFor(backendNode(0)).server().run(session -> {
-            InfinispanStickySessionEncoderProviderFactory factory = (InfinispanStickySessionEncoderProviderFactory) session.getKeycloakSessionFactory().getProviderFactory(StickySessionEncoderProvider.class, "infinispan");
+            StickySessionEncoderProviderFactory factory = (StickySessionEncoderProviderFactory) session.getKeycloakSessionFactory().getProviderFactory(StickySessionEncoderProvider.class);
             factory.setShouldAttachRoute(true);
         });
     }

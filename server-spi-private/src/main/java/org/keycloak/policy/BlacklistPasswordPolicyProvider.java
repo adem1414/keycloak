@@ -57,6 +57,18 @@ public class BlacklistPasswordPolicyProvider implements PasswordPolicyProvider {
     return validate(user.getUsername(), password);
   }
 
+  /**
+   * Parses the allowed configuration for a {@link BlacklistPasswordPolicyProvider}.
+   * Supported syntax is {@¢ode passwordBlacklist(fileName)}
+   *
+   * Example configurations:
+   * <ul>
+   *     <li>{@code passwordBlacklist(test-password-blacklist.txt)}</li>
+   * </ul>
+   *
+   * @param blacklistName
+   * @return
+   */
   @Override
   public Object parseConfig(String blacklistName) {
 

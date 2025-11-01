@@ -17,12 +17,10 @@
 
 package org.keycloak.quarkus.runtime.cli.command;
 
-import org.keycloak.quarkus.runtime.Environment;
+import org.keycloak.common.util.Environment;
 
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
-import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Option;
 
 @Command(name = StartDev.NAME,
         header = "Start the server in development mode.",
@@ -31,21 +29,35 @@ import picocli.CommandLine.Option;
         },
         footer = "%nDo NOT start the server using this command when deploying to production.%n%n"
                 + "Use '${PARENT-COMMAND-FULL-NAME:-$PARENTCOMMAND} ${COMMAND-NAME} --help-all' to list all available options, including build options.")
-public final class StartDev extends AbstractStartCommand implements Runnable {
+public final class StartDev extends AbstractAutoBuildCommand {
 
     public static final String NAME = "start-dev";
-
-    @Option(names = AUTO_BUILD_OPTION_LONG, hidden = true)
-    Boolean autoConfig;
-
-    @Mixin
-    HelpAllMixin helpAllMixin;
 
     @CommandLine.Mixin
     ImportRealmMixin importRealmMixin;
 
     @Override
-    protected void doBeforeRun() {
-        Environment.forceDevProfile();
+    public String getInitProfile() {
+        return Environment.DEV_PROFILE_VALUE; // only ever dev - could be a validation instead
+    }
+
+    @Override
+    public String getDefaultProfile() {
+        return Environment.DEV_PROFILE_VALUE;
+    }
+
+    @Override
+    public boolean includeRuntime() {
+        return true;
+    }
+
+    @Override
+    public String getName() {
+        return NAME;
+    }
+
+    @Override
+    public boolean isServing() {
+        return true;
     }
 }

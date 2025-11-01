@@ -29,18 +29,19 @@ import org.keycloak.representations.idm.RealmEventsConfigRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.TestLdapConnectionRepresentation;
 
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.FormParam;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DefaultValue;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.FormParam;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 
 import java.util.List;
 import java.util.Map;
@@ -125,6 +126,58 @@ public interface RealmResource {
             @QueryParam("ipAddress") String ipAddress, @QueryParam("first") Integer firstResult,
             @QueryParam("max") Integer maxResults);
 
+    /**
+     * Get events
+     *
+     * Returns all events, or filters them based on URL query parameters listed here
+     *
+     * @param types The types of events to return
+     * @param client App or oauth client name
+     * @param user User id
+     * @param ipAddress IP address
+     * @param dateFrom From (inclusive) date (yyyy-MM-dd)
+     * @param dateTo To (inclusive) date (yyyy-MM-dd)
+     * @param firstResult Paging offset
+     * @param maxResults Maximum results size (defaults to 100)
+     * @param direction The direction to sort events by. Available values are "asc" or "desc". The parameter is supported since Keycloak 26.2
+     * @return events
+     * @since Keycloak 26.2. Use method {@link #getEvents(List, String, String, String, String, String, Integer, Integer)} for the older versions of the Keycloak server
+     */
+    @Path("events")
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    List<EventRepresentation> getEvents(@QueryParam("type") List<String> types, @QueryParam("client") String client,
+            @QueryParam("user") String user, @QueryParam("dateFrom") String dateFrom, @QueryParam("dateTo") String dateTo,
+            @QueryParam("ipAddress") String ipAddress, @QueryParam("first") Integer firstResult,
+            @QueryParam("max") Integer maxResults,
+            @QueryParam("direction") String direction);
+
+    /**
+     * Get events
+     *
+     * Returns all events, or filters them based on URL query parameters listed here
+     *
+     * @param types The types of events to return
+     * @param client App or oauth client name
+     * @param user User id
+     * @param ipAddress IP address
+     * @param dateFrom time in Epoch timestamp. The parameter is supported since Keycloak 26.2
+     * @param dateTo time in Epoch timestamp. The parameter is supported since Keycloak 26.2
+     * @param firstResult Paging offset
+     * @param maxResults Maximum results size (defaults to 100)
+     * @param direction The direction to sort events by. Available values are "asc" or "desc". The parameter is supported since Keycloak 26.2
+     * @return events
+     * @since Keycloak 26.2. Use method {@link #getEvents(List, String, String, String, String, String, Integer, Integer)} for the older versions of the Keycloak server
+     */
+    @Path("events")
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    List<EventRepresentation> getEvents(@QueryParam("type") List<String> types, @QueryParam("client") String client,
+            @QueryParam("user") String user, @QueryParam("dateFrom") long dateFrom, @QueryParam("dateTo") long dateTo,
+            @QueryParam("ipAddress") String ipAddress, @QueryParam("first") Integer firstResult,
+            @QueryParam("max") Integer maxResults,
+            @QueryParam("direction") String direction);
+
     @DELETE
     @Path("admin-events")
     void clearAdminEvents();
@@ -151,6 +204,64 @@ public interface RealmResource {
             @QueryParam("resourcePath") String resourcePath, @QueryParam("resourceTypes") List<String> resourceTypes, @QueryParam("dateFrom") String dateFrom,
             @QueryParam("dateTo") String dateTo, @QueryParam("first") Integer firstResult,
             @QueryParam("max") Integer maxResults);
+
+    /**
+     * Get admin events
+     *
+     * Returns all admin events, or filters events based on URL query parameters listed here
+     *
+     * @param operationTypes operation types
+     * @param authRealm realm, from where the user was authenticated
+     * @param authClient client, which authenticated the event operation
+     * @param authUser user, which did the particular admin event
+     * @param authIpAddress IP address from which the event was done
+     * @param resourcePath resource path
+     * @param resourceTypes resource types
+     * @param dateFrom time in Epoch timestamp. The parameter is supported since Keycloak 26.2
+     * @param dateTo time in Epoch timestamp. The parameter is supported since Keycloak 26.2
+     * @param firstResult Paging offset
+     * @param maxResults Maximum results size (defaults to 100)
+     * @param direction The direction to sort events by. Available values are "asc" or "desc". The parameter is supported since Keycloak 26.2
+     * @return admin events
+     * @since Keycloak 26.2. Use method {@link #getAdminEvents(List, String, String, String, String, String, List, String, String, Integer, Integer)} for the older versions of the Keycloak server
+     */
+    @GET
+    @Path("admin-events")
+    @Produces(MediaType.APPLICATION_JSON)
+    List<AdminEventRepresentation> getAdminEvents(@QueryParam("operationTypes") List<String> operationTypes, @QueryParam("authRealm") String authRealm, @QueryParam("authClient") String authClient,
+            @QueryParam("authUser") String authUser, @QueryParam("authIpAddress") String authIpAddress,
+            @QueryParam("resourcePath") String resourcePath, @QueryParam("resourceTypes") List<String> resourceTypes, @QueryParam("dateFrom") String dateFrom,
+            @QueryParam("dateTo") String dateTo, @QueryParam("first") Integer firstResult,
+            @QueryParam("max") Integer maxResults, @QueryParam("direction") String direction);
+
+    /**
+     * Get admin events
+     *
+     * Returns all admin events, or filters events based on URL query parameters listed here
+     *
+     * @param operationTypes operation types
+     * @param authRealm realm, from where the user was authenticated
+     * @param authClient client, which authenticated the event operation
+     * @param authUser user, which did the particular admin event
+     * @param authIpAddress IP address from which the event was done
+     * @param resourcePath resource path
+     * @param resourceTypes resource types
+     * @param dateFrom From (inclusive) date (yyyy-MM-dd)
+     * @param dateTo To (inclusive) date (yyyy-MM-dd)
+     * @param firstResult Paging offset
+     * @param maxResults Maximum results size (defaults to 100)
+     * @param direction The direction to sort events by. Available values are "asc" or "desc". The parameter is supported since Keycloak 26.2
+     * @return admin events
+     * @since Keycloak 26.2. Use method {@link #getAdminEvents(List, String, String, String, String, String, List, String, String, Integer, Integer)} for the older versions of the Keycloak server
+     */
+    @GET
+    @Path("admin-events")
+    @Produces(MediaType.APPLICATION_JSON)
+    List<AdminEventRepresentation> getAdminEvents(@QueryParam("operationTypes") List<String> operationTypes, @QueryParam("authRealm") String authRealm, @QueryParam("authClient") String authClient,
+            @QueryParam("authUser") String authUser, @QueryParam("authIpAddress") String authIpAddress,
+            @QueryParam("resourcePath") String resourcePath, @QueryParam("resourceTypes") List<String> resourceTypes, @QueryParam("dateFrom") long dateFrom,
+            @QueryParam("dateTo") long dateTo, @QueryParam("first") Integer firstResult,
+            @QueryParam("max") Integer maxResults, @QueryParam("direction") String direction);
 
     @GET
     @Path("events/config")
@@ -230,7 +341,7 @@ public interface RealmResource {
     @POST
     @Path("ldap-server-capabilities")
     @Consumes(MediaType.APPLICATION_JSON)
-    @Produces(javax.ws.rs.core.MediaType.APPLICATION_JSON)
+    @Produces(jakarta.ws.rs.core.MediaType.APPLICATION_JSON)
     List<LDAPCapabilityRepresentation> ldapServerCapabilities(TestLdapConnectionRepresentation config);
 
     @Path("testSMTPConnection")
@@ -256,6 +367,14 @@ public interface RealmResource {
     @POST
     void clearKeysCache();
 
+    /**
+     * Clear the crl cache (CRLs loaded for X509 authentication
+     * @since Keycloak 26.2
+     */
+    @Path("clear-crl-cache")
+    @POST
+    void clearCrlCache();
+
     @Path("push-revocation")
     @POST
     @Produces(MediaType.APPLICATION_JSON)
@@ -266,9 +385,16 @@ public interface RealmResource {
     @Produces(MediaType.APPLICATION_JSON)
     GlobalRequestResult logoutAll();
 
+    /**
+     * Delete given user session
+     *
+     * @param sessionId session ID
+     * @param offline Parameter available since Keycloak server 24.0.2. Will be ignored on older Keycloak versions with the default value false.
+     * @throws jakarta.ws.rs.NotFoundException if the user session is not found
+     */
     @Path("sessions/{session}")
     @DELETE
-    void deleteSession(@PathParam("session") String sessionId);
+    void deleteSession(@PathParam("session") String sessionId, @DefaultValue("false") @QueryParam("isOffline") boolean offline);
 
     @Path("components")
     ComponentsResource components();
@@ -288,4 +414,13 @@ public interface RealmResource {
 
     @Path("client-policies/profiles")
     ClientPoliciesProfilesResource clientPoliciesProfilesResource();
+
+    @Path("organizations")
+    OrganizationsResource organizations();
+
+    @Path("client-types")
+    ClientTypesResource clientTypes();
+
+    @Path("workflows")
+    WorkflowsResource workflows();
 }

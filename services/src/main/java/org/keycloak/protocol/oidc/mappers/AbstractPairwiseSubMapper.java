@@ -13,6 +13,7 @@ import org.keycloak.protocol.oidc.utils.PairwiseSubMapperValidator;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.IDToken;
+import org.keycloak.representations.LogoutToken;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -22,7 +23,7 @@ import java.util.List;
  *
  * @author <a href="mailto:martin.hardselius@gmail.com">Martin Hardselius</a>
  */
-public abstract class AbstractPairwiseSubMapper extends AbstractOIDCProtocolMapper implements OIDCAccessTokenMapper, OIDCIDTokenMapper, UserInfoTokenMapper {
+public abstract class AbstractPairwiseSubMapper extends AbstractOIDCProtocolMapper implements OIDCAccessTokenMapper, OIDCIDTokenMapper, UserInfoTokenMapper, TokenIntrospectionTokenMapper, LogoutTokenMapper {
     public static final String PROVIDER_ID_SUFFIX = "-pairwise-sub-mapper";
 
     public abstract String getIdPrefix();
@@ -76,6 +77,17 @@ public abstract class AbstractPairwiseSubMapper extends AbstractOIDCProtocolMapp
     }
 
     @Override
+    public AccessToken transformIntrospectionToken(AccessToken token, ProtocolMapperModel mappingModel, KeycloakSession session, UserSessionModel userSession, ClientSessionContext clientSessionCtx) {
+        setAccessTokenSubject(token, generateSub(mappingModel, getSectorIdentifier(clientSessionCtx.getClientSession().getClient(), mappingModel), userSession.getUser().getId()));
+        return token;
+    }
+
+    @Override
+    public LogoutToken transformLogoutToken(LogoutToken token, ProtocolMapperModel mappingModel, KeycloakSession session, UserSessionModel userSession, ClientSessionContext clientSessionCtx) {
+        setLogoutTokenSubject(token, generateSub(mappingModel, getSectorIdentifier(clientSessionCtx.getClientSession().getClient(), mappingModel), userSession.getUser().getId()));
+        return token;
+    }
+    @Override
     public AccessToken transformUserInfoToken(AccessToken token, ProtocolMapperModel mappingModel, KeycloakSession session, UserSessionModel userSession, ClientSessionContext clientSessionCtx) {
         setUserInfoTokenSubject(token, generateSub(mappingModel, getSectorIdentifier(clientSessionCtx.getClientSession().getClient(), mappingModel), userSession.getUser().getId()));
         return token;
@@ -86,6 +98,10 @@ public abstract class AbstractPairwiseSubMapper extends AbstractOIDCProtocolMapp
     }
 
     protected void setAccessTokenSubject(IDToken token, String pairwiseSub) {
+        token.setSubject(pairwiseSub);
+    }
+
+    protected void setLogoutTokenSubject(LogoutToken token, String pairwiseSub) {
         token.setSubject(pairwiseSub);
     }
 

@@ -3,6 +3,7 @@ package org.keycloak.broker.provider.util;
 import org.keycloak.common.enums.SslRequired;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.models.*;
+import org.keycloak.representations.idm.RealmRepresentation;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -65,21 +66,6 @@ public class IdentityBrokerStateTestHelpers {
         @Override
         public Stream<RoleModel> searchForRolesStream(String search, Integer first, Integer max) {
             return null;
-        }
-
-        @Override
-        public Stream<String> getDefaultRolesStream() {
-            return null;
-        }
-
-        @Override
-        public void addDefaultRole(String name) {
-
-        }
-
-        @Override
-        public void removeDefaultRoles(String... defaultRoles) {
-
         }
 
         @Override
@@ -554,21 +540,6 @@ public class IdentityBrokerStateTestHelpers {
         }
 
         @Override
-        public Stream<String> getDefaultRolesStream() {
-            return null;
-        }
-
-        @Override
-        public void addDefaultRole(String name) {
-
-        }
-
-        @Override
-        public void removeDefaultRoles(String... defaultRoles) {
-
-        }
-
-        @Override
         public String getName() {
             return null;
         }
@@ -705,6 +676,26 @@ public class IdentityBrokerStateTestHelpers {
 
         @Override
         public void setPermanentLockout(boolean val) {
+
+        }
+
+        @Override
+        public int getMaxTemporaryLockouts() {
+            return 0;
+        }
+
+        @Override
+        public void setMaxTemporaryLockouts(int val) {
+
+        }
+
+        @Override
+        public RealmRepresentation.BruteForceStrategy getBruteForceStrategy() {
+            return RealmRepresentation.BruteForceStrategy.MULTIPLE;
+        }
+
+        @Override
+        public void setBruteForceStrategy(RealmRepresentation.BruteForceStrategy val) {
 
         }
 
@@ -1174,6 +1165,12 @@ public class IdentityBrokerStateTestHelpers {
         }
 
         @Override
+        public Stream<ClientModel> searchClientByAuthenticationFlowBindingOverrides(Map<String, String> overrides, Integer firstResult, Integer maxResults) {
+            return null;
+        }
+
+
+        @Override
         public void updateRequiredCredentials(Set<String> creds) {
 
         }
@@ -1255,6 +1252,16 @@ public class IdentityBrokerStateTestHelpers {
 
         @Override
         public void setDockerAuthenticationFlow(AuthenticationFlowModel flow) {
+
+        }
+
+        @Override
+        public AuthenticationFlowModel getFirstBrokerLoginFlow() {
+            return null;
+        }
+
+        @Override
+        public void setFirstBrokerLoginFlow(AuthenticationFlowModel flow) {
 
         }
 
@@ -1614,6 +1621,15 @@ public class IdentityBrokerStateTestHelpers {
         }
 
         @Override
+        public ClientModel getAdminPermissionsClient() {
+            return null;
+        }
+
+        @Override
+        public void setAdminPermissionsClient(ClientModel client) {
+        }
+
+        @Override
         public boolean isIdentityFederationEnabled() {
             return false;
         }
@@ -1680,11 +1696,6 @@ public class IdentityBrokerStateTestHelpers {
 
         @Override
         public Stream<GroupModel> getTopLevelGroupsStream(Integer first, Integer max) {
-            return null;
-        }
-
-        @Override
-        public Stream<GroupModel> searchForGroupByNameStream(String search, Integer first, Integer max) {
             return null;
         }
 
@@ -1782,6 +1793,57 @@ public class IdentityBrokerStateTestHelpers {
         public void decreaseRemainingCount(ClientInitialAccessModel clientInitialAccess) {
 
         }
-    }
 
+        @Override
+        public Stream<RequiredActionConfigModel> getRequiredActionConfigsStream() {
+            return Stream.empty();
+        }
+
+        @Override
+        public RequiredActionConfigModel getRequiredActionConfigByAlias(String alias) {
+            return null;
+        }
+
+        @Override
+        public RequiredActionConfigModel getRequiredActionConfigById(String id) {
+            return null;
+        }
+
+        @Override
+        public void removeRequiredActionProviderConfig(RequiredActionConfigModel model) {
+
+        }
+
+        @Override
+        public void updateRequiredActionConfig(RequiredActionConfigModel model) {
+
+        }
+
+        @Override
+        public boolean isOrganizationsEnabled() {
+            return false;
+        }
+
+        @Override
+        public void setOrganizationsEnabled(boolean organizationsEnabled) {
+        }
+
+        @Override
+        public boolean isAdminPermissionsEnabled() {
+            return false;
+        }
+
+        @Override
+        public void setAdminPermissionsEnabled(boolean adminPermissionsEnabled) {
+        }
+
+        @Override
+        public boolean isVerifiableCredentialsEnabled() {
+            return false;
+        }
+
+        @Override
+        public void setVerifiableCredentialsEnabled(boolean verifiableCredentialsEnabled) {
+        }
+    }
 }

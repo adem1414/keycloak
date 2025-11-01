@@ -17,6 +17,8 @@
 
 package org.keycloak.storage.ldap;
 
+import static org.keycloak.storage.UserStorageProviderModel.IMPORT_ENABLED;
+
 import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.models.LDAPConstants;
 import org.keycloak.storage.UserStorageProvider;
@@ -25,7 +27,6 @@ import javax.naming.directory.SearchControls;
 
 import java.util.Collection;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 
@@ -34,6 +35,8 @@ import java.util.Set;
  *
  */
 public class LDAPConfig {
+
+    public static final String DEFAULT_CONNECTION_TIMEOUT = "5000";
 
     private final MultivaluedHashMap<String, String> config;
     private final Set<String> binaryAttributeNames = new HashSet<>();
@@ -78,6 +81,19 @@ public class LDAPConfig {
         }
 
         return usersDn;
+    }
+
+    public String getRelativeCreateDn() {
+        String relativeCreateDn = config.getFirst(LDAPConstants.RELATIVE_CREATE_DN);
+        if(relativeCreateDn != null) {
+            relativeCreateDn = relativeCreateDn.trim();
+            return relativeCreateDn.endsWith(",") ? relativeCreateDn : relativeCreateDn + ",";
+        }
+        return "";
+    }
+
+    public String getBaseDn() {
+        return config.getFirst(LDAPConstants.BASE_DN);
     }
 
     public Collection<String> getUserObjectClasses() {
@@ -129,36 +145,9 @@ public class LDAPConfig {
         }
     }
 
-    public String getConnectionPoolingAuthentication() {
-        return config.getFirst(LDAPConstants.CONNECTION_POOLING_AUTHENTICATION);
-    }
-
-    public String getConnectionPoolingDebug() {
-        return config.getFirst(LDAPConstants.CONNECTION_POOLING_DEBUG);
-    }
-
-    public String getConnectionPoolingInitSize() {
-        return config.getFirst(LDAPConstants.CONNECTION_POOLING_INITSIZE);
-    }
-
-    public String getConnectionPoolingMaxSize() {
-        return config.getFirst(LDAPConstants.CONNECTION_POOLING_MAXSIZE);
-    }
-
-    public String getConnectionPoolingPrefSize() {
-        return config.getFirst(LDAPConstants.CONNECTION_POOLING_PREFSIZE);
-    }
-
-    public String getConnectionPoolingProtocol() {
-        return config.getFirst(LDAPConstants.CONNECTION_POOLING_PROTOCOL);
-    }
-
-    public String getConnectionPoolingTimeout() {
-        return config.getFirst(LDAPConstants.CONNECTION_POOLING_TIMEOUT);
-    }
-
     public String getConnectionTimeout() {
-        return config.getFirst(LDAPConstants.CONNECTION_TIMEOUT);
+        return config.getFirstOrDefault(LDAPConstants.CONNECTION_TIMEOUT,
+                System.getProperty("com.sun.jndi.ldap.connect.timeout", DEFAULT_CONNECTION_TIMEOUT));
     }
 
     public String getReadTimeout() {
@@ -197,6 +186,20 @@ public class LDAPConfig {
     public boolean isPagination() {
         String pagination = config.getFirst(LDAPConstants.PAGINATION);
         return Boolean.parseBoolean(pagination);
+    }
+
+    public int getMaxConditions() {
+        String string = config.getFirst(LDAPConstants.MAX_CONDITIONS);
+        if (string != null) {
+            try {
+                int max = Integer.parseInt(string);
+                if (max > 0) {
+                    return max;
+                }
+            } catch (NumberFormatException e) {
+            }
+        }
+        return LDAPConstants.DEFAULT_MAX_CONDITIONS;
     }
 
     public int getBatchSizeForSync() {
@@ -251,6 +254,10 @@ public class LDAPConfig {
         }
     }
 
+    public String getReferral() {
+        return config.getFirst(LDAPConstants.REFERRAL);
+    }
+
     public void addBinaryAttribute(String attrName) {
         binaryAttributeNames.add(attrName);
     }
@@ -259,6 +266,9 @@ public class LDAPConfig {
         return binaryAttributeNames;
     }
 
+    public boolean isConnectionTrace() {
+        return Boolean.parseBoolean(config.getFirstOrDefault(LDAPConstants.CONNECTION_TRACE, Boolean.FALSE.toString()));
+    }
 
     @Override
     public boolean equals(Object obj) {
@@ -274,6 +284,10 @@ public class LDAPConfig {
 
     public boolean isEdirectory() {
         return LDAPConstants.VENDOR_NOVELL_EDIRECTORY.equalsIgnoreCase(getVendor());
+    }
+
+    public boolean isImportEnabled() {
+        return Boolean.parseBoolean(config.getFirstOrDefault(IMPORT_ENABLED, Boolean.TRUE.toString())) ;
     }
 
     @Override

@@ -18,7 +18,7 @@ package org.keycloak.testsuite.auth.page.login;
 
 import org.jboss.arquillian.graphene.page.Page;
 
-import javax.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.core.UriBuilder;
 
 /**
  *
@@ -42,7 +42,7 @@ public abstract class Login extends LoginBase {
         setUriParameter(PROTOCOL, protocol);
     }
     
-    public String getProtocol() {
+    private String getProtocol() {
         return getUriParameter(PROTOCOL).toString();
     }
     

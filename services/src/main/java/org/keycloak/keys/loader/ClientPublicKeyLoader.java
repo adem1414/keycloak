@@ -20,6 +20,8 @@ package org.keycloak.keys.loader;
 import org.jboss.logging.Logger;
 import org.keycloak.authentication.authenticators.client.JWTClientAuthenticator;
 import org.keycloak.common.util.KeyUtils;
+import org.keycloak.crypto.JavaAlgorithm;
+import org.keycloak.crypto.KeyType;
 import org.keycloak.crypto.KeyUse;
 import org.keycloak.crypto.KeyWrapper;
 import org.keycloak.crypto.PublicKeysWrapper;
@@ -72,7 +74,7 @@ public class ClientPublicKeyLoader implements PublicKeyLoader {
             String jwksUrl = config.getJwksUrl();
             jwksUrl = ResolveRelative.resolveRelativeUri(session, client.getRootUrl(), jwksUrl);
             JSONWebKeySet jwks = JWKSHttpUtils.sendJwksRequest(session, jwksUrl);
-            return JWKSUtils.getKeyWrappersForUse(jwks, keyUse);
+            return JWKSUtils.getKeyWrappersForUse(jwks, keyUse, true);
         } else if (config.isUseJwksString()) {
             JSONWebKeySet jwks = JsonSerialization.readValue(config.getJwksString(), JSONWebKeySet.class);
             return JWKSUtils.getKeyWrappersForUse(jwks, keyUse);
@@ -112,15 +114,22 @@ public class ClientPublicKeyLoader implements PublicKeyLoader {
             kid = certInfo.getKid() != null ? certInfo.getKid() : KeyUtils.createKeyId(clientCert.getPublicKey());
             keyWrapper.setKid(kid);
             keyWrapper.setPublicKey(clientCert.getPublicKey());
-            keyWrapper.setType(clientCert.getPublicKey().getAlgorithm());
+            keyWrapper.setType(JavaAlgorithm.getKeyType(clientCert.getPublicKey().getAlgorithm()));
             keyWrapper.setCertificate(clientCert);
+            keyWrapper.setIsDefaultClientCertificate(true);
+            if (KeyType.OKP.equals(keyWrapper.getType())) {
+                keyWrapper.setCurve(clientCert.getPublicKey().getAlgorithm());
+            }
         } else {
             PublicKey publicKey = KeycloakModelUtils.getPublicKey(encodedPublicKey);
             // Check if we have kid in DB, generate otherwise
             kid = certInfo.getKid() != null ? certInfo.getKid() : KeyUtils.createKeyId(publicKey);
             keyWrapper.setKid(kid);
             keyWrapper.setPublicKey(publicKey);
-            keyWrapper.setType(publicKey.getAlgorithm());
+            keyWrapper.setType(JavaAlgorithm.getKeyType(publicKey.getAlgorithm()));
+            if (KeyType.OKP.equals(keyWrapper.getType())) {
+                keyWrapper.setCurve(publicKey.getAlgorithm());
+            }
         }
         return keyWrapper;
     }

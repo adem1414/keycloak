@@ -61,6 +61,27 @@ public class KeycloakSanitizerTest {
     }
 
     @Test
+    public void testLinks() throws Exception {
+        List<String> html = new ArrayList<>();
+
+        html.add("<a href=\"https://www.example.org/sub-page\">Link text</a>");
+        String expectedResult = "<a href=\"https://www.example.org/sub-page\" rel=\"nofollow\">Link text</a>";
+        assertResult(expectedResult, html);
+
+        html.set(0, "<a href=\"https://www.example.org/terms-of-service\" target=\"_blank\">Link text</a>");
+        expectedResult = "<a href=\"https://www.example.org/terms-of-service\" target=\"_blank\" rel=\"nofollow noopener noreferrer\">Link text</a>";
+        assertResult(expectedResult, html);
+
+        html.set(0, "<a href=\"https://www.example.org/sub-page\" target=\"_top\">Link text</a>");
+        expectedResult = "<a href=\"https://www.example.org/sub-page\" rel=\"nofollow\">Link text</a>";
+        assertResult(expectedResult, html);
+
+        html.set(0, "<a href=\"https://www.example.org/sub-page\" target=\"someframe\">Link text</a>");
+        expectedResult = "<a href=\"https://www.example.org/sub-page\" rel=\"nofollow\">Link text</a>";
+        assertResult(expectedResult, html);
+    }
+
+    @Test
     public void testUrls() throws Exception {
         List<String> html = new ArrayList<>();
 
@@ -72,6 +93,22 @@ public class KeycloakSanitizerTest {
 
         html.set(0, "<p><a href=\"javascript:alert('hello!');\">link</a></p>");
         assertResult("<p>link</p>", html);
+
+        html.set(0, "<p><a href=\"javascript:alert(document.domain);\">link</a></p>");
+        assertResult("<p>link</p>", html);
+
+        html.set(0, "<p><a href=\"javascript&colon;alert(document.domain);\">link</a></p>");
+        assertResult("<p>link</p>", html);
+
+        // Effectively same as previous case, but with \0 character added
+        html.set(0, "<p><a href=\"javascript&\0colon;alert(document.domain);\">link</a></p>");
+        assertResult("<p>link</p>", html);
+
+        html.set(0, "<p><a href=\"javascript&amp;amp;\0colon;alert(document.domain);\">link</a></p>");
+        assertResult("<p>link</p>", html);
+
+        html.set(0, "<p><a href=\"javascript&amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;amp;\0colon;alert(document.domain);\">link</a></p>");
+        assertResult("", html);
 
         html.set(0, "<p><a href=\"https://localhost?key=123&msg=abc\">link</a></p>");
         assertResult("<p><a href=\"https://localhost?key=123&msg=abc\" rel=\"nofollow\">link</a></p>", html);

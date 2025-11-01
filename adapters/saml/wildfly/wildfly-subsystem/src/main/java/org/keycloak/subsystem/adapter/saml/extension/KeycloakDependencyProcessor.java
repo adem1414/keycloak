@@ -28,7 +28,6 @@ import org.jboss.as.web.common.WarMetaData;
 import org.jboss.metadata.web.jboss.JBossWebMetaData;
 import org.jboss.metadata.web.spec.LoginConfigMetaData;
 import org.jboss.modules.Module;
-import org.jboss.modules.ModuleIdentifier;
 import org.jboss.modules.ModuleLoader;
 
 /**
@@ -36,10 +35,10 @@ import org.jboss.modules.ModuleLoader;
  */
 public abstract class KeycloakDependencyProcessor implements DeploymentUnitProcessor {
 
-    private static final ModuleIdentifier KEYCLOAK_JBOSS_CORE_ADAPTER = ModuleIdentifier.create("org.keycloak.keycloak-jboss-adapter-core");
-    private static final ModuleIdentifier KEYCLOAK_CORE_ADAPTER = ModuleIdentifier.create("org.keycloak.keycloak-saml-adapter-core");
-    private static final ModuleIdentifier KEYCLOAK_API_ADAPTER = ModuleIdentifier.create("org.keycloak.keycloak-saml-adapter-api-public");
-    private static final ModuleIdentifier KEYCLOAK_COMMON = ModuleIdentifier.create("org.keycloak.keycloak-common");
+    static final String KEYCLOAK_JBOSS_CORE_ADAPTER = "org.keycloak.keycloak-jboss-adapter-core";
+    static final String KEYCLOAK_CORE_ADAPTER = "org.keycloak.keycloak-saml-adapter-core";
+    static final String KEYCLOAK_API_ADAPTER = "org.keycloak.keycloak-saml-adapter-api-public";
+    static final String KEYCLOAK_COMMON = "org.keycloak.keycloak-common";
 
     @Override
     public void deploy(DeploymentPhaseContext phaseContext) throws DeploymentUnitProcessingException {
@@ -63,15 +62,23 @@ public abstract class KeycloakDependencyProcessor implements DeploymentUnitProce
          // Next phase, need to detect if this is a Keycloak deployment.  If not, don't add the modules.
 
         final ModuleSpecification moduleSpecification = deploymentUnit.getAttachment(Attachments.MODULE_SPECIFICATION);
-        final ModuleLoader moduleLoader = Module.getBootModuleLoader();
+        ModuleLoader moduleLoader = Module.getCallerModuleLoader();
+        if (moduleLoader == null) {
+            moduleLoader = Module.getSystemModuleLoader();
+        }
+
+        addCoreModules(moduleSpecification, moduleLoader);
         addCommonModules(moduleSpecification, moduleLoader);
         addPlatformSpecificModules(phaseContext, moduleSpecification, moduleLoader);
+    }
+
+    protected void addCoreModules(ModuleSpecification moduleSpecification, ModuleLoader moduleLoader) {
+        moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, KEYCLOAK_CORE_ADAPTER, false, false, false, false));
     }
 
     private void addCommonModules(ModuleSpecification moduleSpecification, ModuleLoader moduleLoader) {
         // ModuleDependency(ModuleLoader moduleLoader, ModuleIdentifier identifier, boolean optional, boolean export, boolean importServices, boolean userSpecified)
         moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, KEYCLOAK_JBOSS_CORE_ADAPTER, false, false, false, false));
-        moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, KEYCLOAK_CORE_ADAPTER, false, false, false, false));
         moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, KEYCLOAK_API_ADAPTER, false, false, false, false));
         moduleSpecification.addSystemDependency(new ModuleDependency(moduleLoader, KEYCLOAK_COMMON, false, false, false, false));
     }

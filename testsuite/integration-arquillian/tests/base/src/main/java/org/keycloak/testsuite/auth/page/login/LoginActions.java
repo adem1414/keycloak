@@ -20,7 +20,7 @@ import org.keycloak.testsuite.util.URLUtils;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
 
-import javax.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.core.UriBuilder;
 
 import static org.keycloak.testsuite.util.UIUtils.clickLink;
 
@@ -36,10 +36,10 @@ public class LoginActions extends LoginBase {
                 .path("login-actions");
     }
 
-    @FindBy(css = "input[type='submit']")
+    @FindBy(css = "*[type='submit']")
     private WebElement submitButton;
 
-    @FindBy(css = "button[type='submit']")
+    @FindBy(css = "*[name='cancel-aia']")
     private WebElement cancelButton;
 
     public void submit() {

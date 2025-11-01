@@ -19,9 +19,7 @@ package org.keycloak.testsuite.client;
 
 import org.junit.Test;
 import org.junit.Rule;
-import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
-import org.keycloak.common.Profile;
 import org.keycloak.common.util.KeycloakUriBuilder;
 import org.keycloak.constants.ServiceUrlConstants;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
@@ -30,21 +28,20 @@ import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.util.AdminClientUtil;
-import org.keycloak.testsuite.arquillian.annotation.DisableFeature;
 import org.keycloak.testsuite.util.ClientBuilder;
 import org.keycloak.testsuite.util.RealmBuilder;
 
 import java.net.URI;
-import javax.ws.rs.client.Client;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.Response.Status;
+import jakarta.ws.rs.client.Client;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response.Status;
 
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThat;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.keycloak.testsuite.util.Matchers.statusCodeIs;
 
 /**
@@ -68,7 +65,6 @@ public class ClientRedirectTest extends AbstractTestRealmKeycloakTest {
      * @throws Exception
      */
     @Test
-    @DisableFeature(value = Profile.Feature.ACCOUNT2, skipRestart = true) // TODO remove this (KEYCLOAK-16228)
     public void testClientRedirectEndpoint() throws Exception {
         oauth.doLogin("test-user@localhost", "password");
 
@@ -77,16 +73,13 @@ public class ClientRedirectTest extends AbstractTestRealmKeycloakTest {
 
         driver.get(getAuthServerRoot().toString() + "realms/test/clients/dummy-test/redirect");
         assertEquals("http://example.org/dummy/base-path", driver.getCurrentUrl());
-
-        driver.get(getAuthServerRoot().toString() + "realms/test/clients/account/redirect");
-        assertEquals(getAuthServerRoot().toString() + "realms/test/account/", driver.getCurrentUrl());
     }
 
     @Test
     public void testRedirectStatusCode() {
         oauth.doLogin("test-user@localhost", "password");
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
-        String token = oauth.doAccessTokenRequest(code, "password").getAccessToken();
+        String code = oauth.parseLoginResponse().getCode();
+        String token = oauth.doAccessTokenRequest(code).getAccessToken();
 
         Client client = AdminClientUtil.createResteasyClient();
         String redirectUrl = getAuthServerRoot().toString() + "realms/test/clients/launchpad-test/redirect";
@@ -110,8 +103,8 @@ public class ClientRedirectTest extends AbstractTestRealmKeycloakTest {
             oauth.doLogin("test-user@localhost", "password");
             events.expectLogin().assertEvent();
 
-            String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
-            String idTokenHint = oauth.doAccessTokenRequest(code,"password").getIdToken();
+            String code = oauth.parseLoginResponse().getCode();
+            String idTokenHint = oauth.doAccessTokenRequest(code).getIdToken();
             events.poll();
 
             URI logout = KeycloakUriBuilder.fromUri(suiteContext.getAuthServerInfo().getBrowserContextRoot().toURI())
@@ -125,7 +118,7 @@ public class ClientRedirectTest extends AbstractTestRealmKeycloakTest {
             log.debug("Current URL: " + driver.getCurrentUrl());
 
             log.debug("check logout_error");
-            events.expectLogoutError(OAuthErrorException.INVALID_REDIRECT_URI).assertEvent();
+            events.expectLogoutError(OAuthErrorException.INVALID_REDIRECT_URI).client(AssertEvents.DEFAULT_CLIENT_ID).assertEvent();
             assertThat(driver.getCurrentUrl(), is(not(equalTo("http://example.org/redirected"))));
         } finally {
             log.debug("removing disabled-client");

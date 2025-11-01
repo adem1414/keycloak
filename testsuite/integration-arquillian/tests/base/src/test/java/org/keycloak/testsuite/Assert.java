@@ -28,7 +28,9 @@ import org.keycloak.representations.idm.IdentityProviderRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.UserFederationProviderFactoryRepresentation;
+import org.keycloak.representations.idm.UserProfileAttributeMetadata;
 import org.keycloak.representations.idm.UserRepresentation;
+import org.keycloak.representations.info.ThemeInfoRepresentation;
 
 import java.util.Arrays;
 import java.util.LinkedList;
@@ -92,6 +94,10 @@ public class Assert extends org.junit.Assert {
             return ((ComponentRepresentation) o1).getName();
         } else if (o1 instanceof ClientScopeRepresentation) {
             return ((ClientScopeRepresentation) o1).getName();
+        } else if (o1 instanceof ThemeInfoRepresentation) {
+            return ((ThemeInfoRepresentation) o1).getName();
+        } else if (o1 instanceof UserProfileAttributeMetadata) {
+            return ((UserProfileAttributeMetadata) o1).getName();
         }
 
         throw new IllegalArgumentException();
@@ -161,9 +167,10 @@ public class Assert extends org.junit.Assert {
 
     public static void assertRoleAttributes(Map<String, List<String>> expected, Map<String, List<String>> actual) {
         MatcherAssert.assertThat(actual.keySet(), equalTo(expected.keySet()));
-        for (String expectedKey : expected.keySet()) {
-            MatcherAssert.assertThat(actual.get(expectedKey).size(), is(equalTo(expected.get(expectedKey).size())));
-            MatcherAssert.assertThat(actual.get(expectedKey), containsInAnyOrder(expected.get(expectedKey).toArray()));
+        for (var entry : expected.entrySet()) {
+            String expectedKey = entry.getKey();
+            MatcherAssert.assertThat(actual.get(expectedKey).size(), is(equalTo(entry.getValue().size())));
+            MatcherAssert.assertThat(actual.get(expectedKey), containsInAnyOrder(entry.getValue().toArray()));
         }
     }
 }

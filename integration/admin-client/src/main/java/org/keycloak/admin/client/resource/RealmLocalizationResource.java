@@ -20,16 +20,16 @@ package org.keycloak.admin.client.resource;
 import java.util.List;
 import java.util.Map;
 
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.MediaType;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
 
 public interface RealmLocalizationResource {
 
@@ -37,10 +37,35 @@ public interface RealmLocalizationResource {
     @Produces(MediaType.APPLICATION_JSON)
     List<String> getRealmSpecificLocales();
 
+    /**
+     * Get the localization texts for the given locale.
+     *
+     * @param locale the locale
+     * @return the localization texts
+     */
     @Path("{locale}")
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    Map<String, String> getRealmLocalizationTexts(final @PathParam("locale") String locale,  @QueryParam("useRealmDefaultLocaleFallback") Boolean useRealmDefaultLocaleFallback);
+    Map<String, String> getRealmLocalizationTexts(final @PathParam("locale") String locale);
+
+
+    /**
+     * DEPRECATED - Get the localization texts for the given locale.
+     *
+     * @param locale the locale
+     * @param useRealmDefaultLocaleFallback whether the localization texts for the realm default locale should be used
+     *        as fallbacks in the result
+     * @return the localization texts
+     * @deprecated use {@link #getRealmLocalizationTexts(String)}, in order to retrieve localization texts without
+     *             fallbacks. If you need fallbacks, call the endpoint multiple time with all the relevant locales (e.g.
+     *             "de" in case of "de-CH") - the realm default locale is NOT the only fallback to be considered.
+     */
+    @Deprecated
+    @Path("{locale}")
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    Map<String, String> getRealmLocalizationTexts(final @PathParam("locale") String locale,
+            @QueryParam("useRealmDefaultLocaleFallback") Boolean useRealmDefaultLocaleFallback);
 
 
     @Path("{locale}/{key}")

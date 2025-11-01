@@ -20,17 +20,15 @@ import org.junit.Before;
 import org.junit.Test;
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.representations.idm.RealmRepresentation;
-import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude;
 import org.keycloak.testsuite.arquillian.migration.Migration;
 
-import javax.ws.rs.NotFoundException;
+import jakarta.ws.rs.NotFoundException;
 import java.util.List;
 
-import org.keycloak.testsuite.arquillian.annotation.AuthServerContainerExclude.AuthServer;
 import static org.keycloak.testsuite.auth.page.AuthRealm.MASTER;
 
 /**
- * Test for DB migration with legacy JPA store
+ * Test for DB migration with the JPA store
  *
  * @author <a href="mailto:vramik@redhat.com">Vlastislav Ramik</a>
  */
@@ -59,15 +57,39 @@ public class MigrationTest extends AbstractMigrationTest {
     }
 
     @Test
-    @Migration(versionPrefix = "17.")
-    public void migration17_xTest() throws Exception{
+    @Migration(versionPrefix = "19.")
+    public void migration19_xTest() throws Exception{
         testMigratedData(false);
-        testMigrationTo18_x();
 
         // Always test offline-token login during migration test
         testOfflineTokenLogin();
         testExtremelyLongClientAttribute(migrationRealm);
 
         testMigrationTo20_x();
+        testMigrationTo21_x();
+        testMigrationTo22_x();
+        testMigrationTo23_x(true);
+        testMigrationTo24_x(true, true);
+        testMigrationTo25_0_0();
+        testMigrationTo26_0_0(true);
+        testMigrationTo26_1_0(true);
+        testMigrationTo26_3_0();
+        testMigrationTo26_4_0();
+    }
+
+    @Test
+    @Migration(versionPrefix = "24.")
+    public void migration24_xTest() throws Exception{
+        testMigratedData(false);
+
+        // Always test offline-token login during migration test
+        testOfflineTokenLogin();
+        testExtremelyLongClientAttribute(migrationRealm);
+
+        testMigrationTo25_0_0();
+        testMigrationTo26_0_0(true);
+        testMigrationTo26_1_0(true);
+        testMigrationTo26_3_0();
+        testMigrationTo26_4_0();
     }
 }

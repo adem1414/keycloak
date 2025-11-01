@@ -20,11 +20,6 @@
 package org.keycloak.representations.info;
 
 import java.util.List;
-import java.util.stream.Collectors;
-
-import org.keycloak.common.crypto.CryptoIntegration;
-import org.keycloak.common.crypto.CryptoProvider;
-import org.keycloak.common.util.KeystoreUtil;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -34,17 +29,9 @@ public class CryptoInfoRepresentation {
     private String cryptoProvider;
     private List<String> supportedKeystoreTypes;
 
-    public static CryptoInfoRepresentation create() {
-        CryptoInfoRepresentation info = new CryptoInfoRepresentation();
+    private List<String> clientSignatureSymmetricAlgorithms;
 
-        CryptoProvider cryptoProvider = CryptoIntegration.getProvider();
-        info.cryptoProvider = cryptoProvider.getClass().getSimpleName();
-        info.supportedKeystoreTypes = CryptoIntegration.getProvider().getSupportedKeyStoreTypes()
-                .map(KeystoreUtil.KeystoreFormat::toString)
-                .collect(Collectors.toList());
-
-        return info;
-    }
+    private List<String> clientSignatureAsymmetricAlgorithms;
 
     public String getCryptoProvider() {
         return cryptoProvider;
@@ -60,5 +47,21 @@ public class CryptoInfoRepresentation {
 
     public void setSupportedKeystoreTypes(List<String> supportedKeystoreTypes) {
         this.supportedKeystoreTypes = supportedKeystoreTypes;
+    }
+
+    public List<String> getClientSignatureSymmetricAlgorithms() {
+        return clientSignatureSymmetricAlgorithms;
+    }
+
+    public void setClientSignatureSymmetricAlgorithms(List<String> clientSignatureSymmetricAlgorithms) {
+        this.clientSignatureSymmetricAlgorithms = clientSignatureSymmetricAlgorithms;
+    }
+
+    public List<String> getClientSignatureAsymmetricAlgorithms() {
+        return clientSignatureAsymmetricAlgorithms;
+    }
+
+    public void setClientSignatureAsymmetricAlgorithms(List<String> clientSignatureAsymmetricAlgorithms) {
+        this.clientSignatureAsymmetricAlgorithms = clientSignatureAsymmetricAlgorithms;
     }
 }

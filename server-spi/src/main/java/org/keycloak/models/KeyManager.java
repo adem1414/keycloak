@@ -28,7 +28,6 @@ import java.security.PublicKey;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.List;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -97,6 +96,10 @@ public interface KeyManager {
             this.privateKey = privateKey;
             this.publicKey = publicKey;
             this.certificate = certificate;
+        }
+
+        public ActiveRsaKey(KeyWrapper keyWrapper) {
+            this(keyWrapper.getKid(), (PrivateKey) keyWrapper.getPrivateKey(), (PublicKey) keyWrapper.getPublicKey(), keyWrapper.getCertificate());
         }
 
         public String getKid() {

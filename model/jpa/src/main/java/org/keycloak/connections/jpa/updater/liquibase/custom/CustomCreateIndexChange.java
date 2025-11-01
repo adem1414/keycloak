@@ -74,7 +74,7 @@ public class CustomCreateIndexChange extends CreateIndexChange {
         }
         try {
             // To check that the table already exists or not on which the index will be created.
-            if (!SnapshotGeneratorFactory.getInstance()
+            if (getTableName() == null || !SnapshotGeneratorFactory.getInstance()
                 .has(new Table().setName(getTableName()).setSchema(new Schema(getCatalogName(), getSchemaName())), database))
                 return super.generateStatements(database);
 
@@ -189,4 +189,10 @@ public class CustomCreateIndexChange extends CreateIndexChange {
         return changeValidationErrors;
     }
 
+    // The default impls seems to be just fine, so this is just to remove the
+    // "class does not implement the 'supports(Database)' method" warnings
+    @Override
+    public boolean supports(Database database) {
+        return super.supports(database);
+    }
 }

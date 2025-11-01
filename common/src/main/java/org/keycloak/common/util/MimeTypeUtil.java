@@ -17,7 +17,7 @@
 
 package org.keycloak.common.util;
 
-import javax.activation.MimetypesFileTypeMap;
+import jakarta.activation.MimetypesFileTypeMap;
 import java.io.File;
 
 /**
@@ -29,10 +29,11 @@ public class MimeTypeUtil {
     static {
         map.addMimeTypes("text/css css CSS");
         map.addMimeTypes("text/javascript js JS");
-        map.addMimeTypes("text/javascript js JS");
+        map.addMimeTypes("application/json json JSON");
         map.addMimeTypes("image/png png PNG");
         map.addMimeTypes("image/svg+xml svg SVG");
         map.addMimeTypes("text/html html htm HTML HTM");
+        map.addMimeTypes("application/wasm wasm WASM");
     }
 
     public static String getContentType(File file) {

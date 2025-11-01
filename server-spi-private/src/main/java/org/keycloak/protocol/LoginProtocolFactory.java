@@ -19,10 +19,13 @@ package org.keycloak.protocol;
 
 import org.keycloak.events.EventBuilder;
 import org.keycloak.models.ClientModel;
+import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.RealmModel;
 import org.keycloak.provider.ProviderFactory;
 import org.keycloak.representations.idm.ClientRepresentation;
+import org.keycloak.representations.idm.ClientScopeRepresentation;
+
 import java.util.Map;
 
 /**
@@ -38,7 +41,7 @@ public interface LoginProtocolFactory extends ProviderFactory<LoginProtocol> {
     Map<String, ProtocolMapperModel> getBuiltinMappers();
 
 
-    Object createProtocolEndpoint(RealmModel realm, EventBuilder event);
+    Object createProtocolEndpoint(KeycloakSession session, EventBuilder event);
 
 
     /**
@@ -58,4 +61,8 @@ public interface LoginProtocolFactory extends ProviderFactory<LoginProtocol> {
      */
     void setupClientDefaults(ClientRepresentation rep, ClientModel newClient);
 
+    /**
+     * Add default values to {@link ClientScopeRepresentation}s that refer to the specific login-protocol
+     */
+    void addClientScopeDefaults(ClientScopeRepresentation clientModel);
 }

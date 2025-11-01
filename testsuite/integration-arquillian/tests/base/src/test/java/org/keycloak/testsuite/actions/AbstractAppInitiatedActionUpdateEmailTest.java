@@ -20,16 +20,15 @@ import org.jboss.arquillian.graphene.page.Page;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
-import org.keycloak.common.Profile;
+import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.UserModel.RequiredAction;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.testsuite.admin.ApiUtil;
-import org.keycloak.testsuite.arquillian.annotation.EnableFeature;
 import org.keycloak.testsuite.pages.EmailUpdatePage;
 import org.keycloak.testsuite.util.UserBuilder;
 
-@EnableFeature(Profile.Feature.UPDATE_EMAIL)
 public abstract class AbstractAppInitiatedActionUpdateEmailTest extends AbstractAppInitiatedActionTest {
 
 	@Page
@@ -57,6 +56,13 @@ public abstract class AbstractAppInitiatedActionUpdateEmailTest extends Abstract
 				.lastName("Doh").build();
 		prepareUser(user);
 		ApiUtil.createUserAndResetPasswordWithAdminClient(testRealm(), user, "password");
+        ApiUtil.enableRequiredAction(testRealm(), RequiredAction.UPDATE_EMAIL, true);
+	}
+
+	private void setRegistrationEmailAsUsername(RealmResource realmResource, boolean enabled) {
+		RealmRepresentation realmRepresentation = realmResource.toRepresentation();
+		realmRepresentation.setRegistrationEmailAsUsername(enabled);
+		realmResource.update(realmRepresentation);
 	}
 
 	protected void prepareUser(UserRepresentation user){
@@ -72,6 +78,7 @@ public abstract class AbstractAppInitiatedActionUpdateEmailTest extends Abstract
 		emailUpdatePage.assertCurrent();
 		emailUpdatePage.cancel();
 
+		assertKcAction(UserModel.RequiredAction.UPDATE_EMAIL.name());
 		assertKcActionStatus("cancelled");
 
 		// assert nothing was updated in persistent store
@@ -121,10 +128,28 @@ public abstract class AbstractAppInitiatedActionUpdateEmailTest extends Abstract
 		emailUpdatePage.changeEmail("");
 		emailUpdatePage.assertCurrent();
 
-		Assert.assertEquals("Please specify email.", emailUpdatePage.getEmailError());
+		Assert.assertTrue(emailUpdatePage.getEmailError().contains("Please specify email."));
 
 		UserRepresentation user = ActionUtil.findUserWithAdminClient(adminClient, "test-user@localhost");
 		Assert.assertEquals("test-user@localhost", user.getEmail());
 	}
 
+	@Test
+	public void updateWithEmailAsUsernameEnabled() throws Exception {
+		Boolean genuineRegistrationEmailAsUsername = testRealm()
+				.toRepresentation()
+				.isRegistrationEmailAsUsername();
+
+		setRegistrationEmailAsUsername(testRealm(), true);
+		try {
+			changeEmailUsingAIA("new@email.com");
+
+			UserRepresentation user = ActionUtil.findUserWithAdminClient(adminClient, "new@email.com");
+			Assert.assertNotNull(user);
+		} finally {
+			setRegistrationEmailAsUsername(testRealm(), genuineRegistrationEmailAsUsername);
+		}
+	}
+
+	protected abstract void changeEmailUsingAIA(String newEmail) throws Exception;
 }

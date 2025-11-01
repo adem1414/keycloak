@@ -16,9 +16,12 @@
  */
 package org.keycloak.models;
 
+import org.keycloak.common.Profile;
+import org.keycloak.common.Profile.Feature;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * <p>A model type representing the configuration for identity providers. It provides some common properties and also a {@link org.keycloak.models.IdentityProviderModel#config}
@@ -28,13 +31,34 @@ import java.util.Map;
  */
 public class IdentityProviderModel implements Serializable {
 
+    public static final String ALIAS = "alias";
+    public static final String ALIAS_NOT_IN = "aliasNotIn";
+    public static final String ISSUER = "issuer";
     public static final String ALLOWED_CLOCK_SKEW = "allowedClockSkew";
+    public static final String AUTHENTICATE_BY_DEFAULT = "authenticateByDefault";
+    public static final String CASE_SENSITIVE_ORIGINAL_USERNAME = "caseSensitiveOriginalUsername";
+    public static final String CLAIM_FILTER_NAME = "claimFilterName";
+    public static final String CLAIM_FILTER_VALUE = "claimFilterValue";
+    public static final String DISPLAY_NAME = "displayName";
+    public static final String DO_NOT_STORE_USERS = "doNotStoreUsers";
+    public static final String ENABLED = "enabled";
+    public static final String FILTERED_BY_CLAIMS = "filteredByClaim";
+    public static final String FIRST_BROKER_LOGIN_FLOW_ID = "firstBrokerLoginFlowId";
+    public static final String HIDE_ON_LOGIN = "hideOnLogin";
+    @Deprecated
+    public static final String LEGACY_HIDE_ON_LOGIN_ATTR = "hideOnLoginPage";
+    public static final String LINK_ONLY = "linkOnly";
     public static final String LOGIN_HINT = "loginHint";
+    public static final String METADATA_DESCRIPTOR_URL = "metadataDescriptorUrl";
+    public static final String ORGANIZATION_ID = "organizationId";
+    public static final String ORGANIZATION_ID_NOT_NULL = "organizationIdNotNull";
     public static final String PASS_MAX_AGE = "passMaxAge";
-
+    public static final String POST_BROKER_LOGIN_FLOW_ID = "postBrokerLoginFlowId";
+    public static final String SEARCH = "search";
     public static final String SYNC_MODE = "syncMode";
-    
-    public static final String HIDE_ON_LOGIN = "hideOnLoginPage";
+    public static final String MIN_VALIDITY_TOKEN = "minValidityToken";
+	public static final String SHOW_IN_ACCOUNT_CONSOLE = "showInAccountConsole";
+    public static final int DEFAULT_MIN_VALIDITY_TOKEN = 5;
 
     private String internalId;
 
@@ -50,7 +74,7 @@ public class IdentityProviderModel implements Serializable {
     private String providerId;
 
     private boolean enabled;
-    
+
     private boolean trustEmail;
 
     private boolean storeToken;
@@ -68,9 +92,13 @@ public class IdentityProviderModel implements Serializable {
 
     private String postBrokerLoginFlowId;
 
+    private String organizationId;
+
     private String displayName;
 
-    private IdentityProviderSyncMode syncMode;
+    private String displayIconClasses;
+
+    private boolean hideOnLogin;
 
     /**
      * <p>A map containing the configuration and properties for a specific identity provider instance and implementation. The items
@@ -96,6 +124,9 @@ public class IdentityProviderModel implements Serializable {
             this.addReadTokenRoleOnCreate = model.addReadTokenRoleOnCreate;
             this.firstBrokerLoginFlowId = model.getFirstBrokerLoginFlowId();
             this.postBrokerLoginFlowId = model.getPostBrokerLoginFlowId();
+            this.organizationId = model.getOrganizationId();
+            this.displayIconClasses = model.getDisplayIconClasses();
+            this.hideOnLogin = model.isHideOnLogin();
         }
     }
 
@@ -206,19 +237,27 @@ public class IdentityProviderModel implements Serializable {
     }
 
     public String getDisplayIconClasses() {
-        return null;
+        return displayIconClasses;
+    }
+
+    public String getOrganizationId() {
+        return this.organizationId;
+    }
+
+    public void setOrganizationId(String organizationId) {
+        this.organizationId = organizationId;
     }
 
     /**
      * <p>Validates this configuration.
-     * 
+     *
      * <p>Sub-classes can override this method in order to enforce provider specific validations.
-     * 
+     *
      * @param realm the realm
      */
     public void validate(RealmModel realm) {
     }
-        
+
     public IdentityProviderSyncMode getSyncMode() {
         return IdentityProviderSyncMode.valueOf(getConfig().getOrDefault(SYNC_MODE, "LEGACY"));
     }
@@ -243,12 +282,108 @@ public class IdentityProviderModel implements Serializable {
         getConfig().put(PASS_MAX_AGE, String.valueOf(passMaxAge));
     }
 
-     
+
     public boolean isHideOnLogin() {
-        return Boolean.valueOf(getConfig().get(HIDE_ON_LOGIN));
+        return this.hideOnLogin;
     }
 
     public void setHideOnLogin(boolean hideOnLogin) {
-        getConfig().put(HIDE_ON_LOGIN, String.valueOf(hideOnLogin));
+        this.hideOnLogin = hideOnLogin;
+    }
+
+    /**
+     * Returns flag whether the users within this IdP should be transient, ie. not stored in Keycloak database.
+     * Default value: {@code false}.
+     * @return
+     */
+    public boolean isTransientUsers() {
+        return Profile.isFeatureEnabled(Feature.TRANSIENT_USERS) && Boolean.valueOf(getConfig().get(DO_NOT_STORE_USERS));
+    }
+
+    /**
+     * Configures the IdP to not store users in Keycloak database. Default value: {@code false}.
+     * @return
+     */
+    public void setTransientUsers(boolean transientUsers) {
+        getConfig().put(DO_NOT_STORE_USERS, String.valueOf(transientUsers));
+    }
+
+    public boolean isFilteredByClaims() {
+        return Boolean.valueOf(getConfig().getOrDefault(FILTERED_BY_CLAIMS, Boolean.toString(false)));
+    }
+
+    public void setFilteredByClaims(boolean filteredByClaims) {
+        getConfig().put(FILTERED_BY_CLAIMS, String.valueOf(filteredByClaims));
+    }
+
+    public String getClaimFilterName() {
+        return String.valueOf(getConfig().getOrDefault(CLAIM_FILTER_NAME, ""));
+    }
+
+    public void setClaimFilterName(String claimFilterName) {
+        getConfig().put(CLAIM_FILTER_NAME, claimFilterName);
+    }
+
+    public String getClaimFilterValue() {
+        return String.valueOf(getConfig().getOrDefault(CLAIM_FILTER_VALUE, ""));
+    }
+
+    public void setClaimFilterValue(String claimFilterValue) {
+        getConfig().put(CLAIM_FILTER_VALUE, claimFilterValue);
+    }
+
+    public String getMetadataDescriptorUrl() {
+        return getConfig().get(METADATA_DESCRIPTOR_URL);
+    }
+
+    public void setMetadataDescriptorUrl(String metadataDescriptorUrl) {
+        getConfig().put(METADATA_DESCRIPTOR_URL, metadataDescriptorUrl);
+    }
+
+    public boolean isCaseSensitiveOriginalUsername() {
+        return Boolean.parseBoolean(getConfig().getOrDefault(CASE_SENSITIVE_ORIGINAL_USERNAME, Boolean.FALSE.toString()));
+    }
+
+    public void setCaseSensitiveOriginalUsername(boolean caseSensitive) {
+        getConfig().put(CASE_SENSITIVE_ORIGINAL_USERNAME, Boolean.valueOf(caseSensitive).toString());
+    }
+
+    public void setMinValidityToken(int minValidityToken) {
+        getConfig().put(MIN_VALIDITY_TOKEN, Integer.toString(minValidityToken));
+    }
+
+	public IdentityProviderShowInAccountConsole getShowInAccountConsole() {
+		return IdentityProviderShowInAccountConsole.valueOf(getConfig().getOrDefault(SHOW_IN_ACCOUNT_CONSOLE, IdentityProviderShowInAccountConsole.ALWAYS.name()));
+	}
+
+    public int getMinValidityToken() {
+        String minValidityTokenString = getConfig().get(MIN_VALIDITY_TOKEN);
+        if (minValidityTokenString != null) {
+            try {
+                int minValidityToken = Integer.parseInt(minValidityTokenString);
+                if (minValidityToken > 0) {
+                    return minValidityToken;
+                }
+            } catch (NumberFormatException e) {
+                // no-op return default
+            }
+        }
+        return DEFAULT_MIN_VALIDITY_TOKEN;
+    }
+
+    @Override
+    public int hashCode() {
+        int hash = 5;
+        hash = 61 * hash + Objects.hashCode(this.internalId);
+        hash = 61 * hash + Objects.hashCode(this.alias);
+        return hash;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (!(obj instanceof IdentityProviderModel)) return false;
+        return Objects.equals(getInternalId(), ((IdentityProviderModel) obj).getInternalId()) &&
+               Objects.equals(getAlias(), ((IdentityProviderModel) obj).getAlias());
     }
 }

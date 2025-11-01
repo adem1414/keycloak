@@ -33,10 +33,11 @@ import org.keycloak.representations.KeyStoreConfig;
 import org.keycloak.representations.idm.CertificateRepresentation;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.CredentialRepresentation;
+import org.keycloak.testsuite.AbstractClientTest;
 import org.keycloak.testsuite.util.AdminEventPaths;
 import org.keycloak.testsuite.util.KeystoreUtils;
 
-import javax.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MediaType;
 import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
 import java.nio.charset.Charset;
@@ -240,6 +241,8 @@ public class CredentialsTest extends AbstractClientTest {
         config.setKeyAlias("alias");
         config.setKeyPassword("keyPass");
         config.setStorePassword("storePass");
+        config.setKeySize(4096);
+        config.setValidity(3);
         byte[] result = certRsc.generateAndGetKeystore(config);
         KeyStore keyStore = CryptoIntegration.getProvider().getKeyStore(preferredKeystoreType);
         keyStore.load(new ByteArrayInputStream(result), "storePass".toCharArray());

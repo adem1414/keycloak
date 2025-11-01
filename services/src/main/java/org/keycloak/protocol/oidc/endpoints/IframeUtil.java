@@ -21,14 +21,18 @@ import org.keycloak.common.Version;
 import org.keycloak.headers.SecurityHeadersProvider;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.services.util.CacheControlUtil;
-import org.keycloak.services.util.P3PHelper;
 
-import javax.ws.rs.core.CacheControl;
-import javax.ws.rs.core.Response;
-import java.io.InputStream;
+import jakarta.ws.rs.core.CacheControl;
+import jakarta.ws.rs.core.Response;
+import java.util.function.Supplier;
 
 public class IframeUtil {
+
     public static Response returnIframeFromResources(String fileName, String version, KeycloakSession session) {
+        return returnIframe(version, session, () -> IframeUtil.class.getResourceAsStream(fileName));
+    }
+
+    public static Response returnIframe(String version, KeycloakSession session, Supplier<Object> responseEntityProvider) {
         CacheControl cacheControl;
         if (version != null) {
             if (!version.equals(Version.RESOURCES_VERSION)) {
@@ -39,9 +43,8 @@ public class IframeUtil {
             cacheControl = CacheControlUtil.noCache();
         }
 
-        InputStream resource = IframeUtil.class.getResourceAsStream(fileName);
+        Object resource = responseEntityProvider.get();
         if (resource != null) {
-            P3PHelper.addP3PHeader();
             session.getProvider(SecurityHeadersProvider.class).options().allowAnyFrameAncestor();
             return Response.ok(resource).cacheControl(cacheControl).build();
         } else {

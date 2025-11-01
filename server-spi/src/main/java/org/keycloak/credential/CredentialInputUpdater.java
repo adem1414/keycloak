@@ -19,8 +19,6 @@ package org.keycloak.credential;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 
-import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -43,10 +41,13 @@ public interface CredentialInputUpdater {
     Stream<String> getDisableableCredentialTypesStream(RealmModel realm, UserModel user);
 
     /**
-     * @deprecated This interface is no longer necessary, collection-based methods were removed from the parent interface
-     * and therefore the parent interface can be used directly
+     * Returns a stream of {@link CredentialModel} instances managed by this provider for the given {@code user}.
+     *
+     * @param realm the realm
+     * @param user the user
+     * @return the credentials managed by this provider for the given {@code user}
      */
-    @Deprecated
-    interface Streams extends CredentialInputUpdater {
+    default Stream<CredentialModel> getCredentials(RealmModel realm, UserModel user) {
+        return Stream.empty();
     }
 }

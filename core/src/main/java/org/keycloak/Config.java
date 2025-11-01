@@ -17,7 +17,14 @@
 
 package org.keycloak;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
+
+import org.keycloak.common.util.StringPropertyReplacer;
+import org.keycloak.common.util.StringPropertyReplacer.PropertyResolver;
+import org.keycloak.common.util.SystemEnvProperties;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -28,6 +35,14 @@ public class Config {
 
     public static void init(ConfigProvider configProvider) {
         Config.configProvider = configProvider;
+        StringPropertyReplacer.setDefaultPropertyResolver(new PropertyResolver() {
+            SystemEnvProperties systemVariables = new SystemEnvProperties(Config.getAllowedSystemVariables());
+
+            @Override
+            public String resolve(String property) {
+                return systemVariables.getProperty(property);
+            }
+        });
     }
 
     public static String getAdminRealm() {
@@ -43,13 +58,40 @@ public class Config {
         }
     }
 
+    public static String getDefaultProvider(String spi) {
+        String provider = configProvider.getDefaultProvider(spi);
+        if (provider == null || provider.trim().equals("")) {
+            return null;
+        } else {
+            return provider;
+        }
+    }
+
     public static Scope scope(String... scope) {
          return configProvider.scope(scope);
+    }
+
+    private static Set<String> getAllowedSystemVariables() {
+        Scope adminScope = configProvider.scope("admin");
+
+        if (adminScope == null) {
+            return Collections.emptySet();
+        }
+
+        String[] allowedSystemVariables = adminScope.getArray("allowed-system-variables");
+
+        if (allowedSystemVariables == null) {
+            return Collections.emptySet();
+        }
+
+        return new HashSet<>(Arrays.asList(allowedSystemVariables));
     }
 
     public static interface ConfigProvider {
 
         String getProvider(String spi);
+
+        String getDefaultProvider(String spi);
 
         Scope scope(String... scope);
 
@@ -60,6 +102,11 @@ public class Config {
         @Override
         public String getProvider(String spi) {
             return System.getProperties().getProperty("keycloak." + spi + ".provider");
+        }
+
+        @Override
+        public String getDefaultProvider(String spi) {
+            return System.getProperties().getProperty("keycloak." + spi + ".provider.default");
         }
 
         @Override
@@ -161,6 +208,11 @@ public class Config {
             throw new UnsupportedOperationException("Not implemented");
         }
 
+        @Override
+        public Scope root() {
+            return new SystemPropertiesScope("keycloak.");
+        }
+
     }
 
     /**
@@ -188,6 +240,21 @@ public class Config {
 
         Scope scope(String... scope);
 
+        /**
+         * @deprecated since 26.3.0, to be removed
+         *
+         * <br>Was introduced for testing purposes and was not fully / correctly implements
+         * across Scope implementations
+         */
+        @Deprecated
         Set<String> getPropertyNames();
+
+        /**
+         * Root {@link Scope} for global options. The key format should match exactly what
+         * is expected to appear in the main configuration file - e.g. metrics-enabled, db, etc.
+         *
+         * @return a {@link Scope} with access to global configuration properties.
+         */
+        Scope root();
     }
 }

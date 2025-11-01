@@ -20,15 +20,16 @@ import org.keycloak.testsuite.util.ReverseProxy;
 import org.keycloak.testsuite.util.SamlClient;
 import org.keycloak.testsuite.util.SamlClientBuilder;
 
-import javax.ws.rs.core.Response;
-import java.io.UnsupportedEncodingException;
+import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -68,7 +69,14 @@ public final class KcSamlBrokerFrontendUrlTest extends AbstractBrokerTest {
                 return realm;
             }
 
-            @Override 
+            @Override
+            public RealmRepresentation createProviderRealm() {
+                RealmRepresentation realm = super.createProviderRealm();
+                realm.setEventsListeners(Collections.singletonList("jboss-logging"));
+                return realm;
+            }
+
+            @Override
             public List<ClientRepresentation> createProviderClients() {
                 List<ClientRepresentation> clients = super.createProviderClients();
 
@@ -114,22 +122,22 @@ public final class KcSamlBrokerFrontendUrlTest extends AbstractBrokerTest {
         updateExecutions(AbstractBrokerTest::disableUpdateProfileOnFirstLogin);
         createUser(bc.consumerRealmName(), "consumer", "password", "FirstName", "LastName", "consumer@localhost.com");
 
-        driver.navigate().to(proxy.getUrl() + "/realms/consumer/account");
+        oauth.clientId("broker-app");
+        oauth.realm(bc.consumerRealmName());
+        oauth.baseUrl(proxy.getUrl());
+        oauth.openLoginForm();
+
         log.debug("Clicking social " + bc.getIDPAlias());
         loginPage.clickSocial(bc.getIDPAlias());
         waitForPage(driver, "sign in to", true);
         log.debug("Logging in");
 
         // make sure the frontend url is used to build the redirect uri when redirecting to the broker
-        try {
-            assertThat(driver.getCurrentUrl(), containsString("client_id=" + URLEncoder.encode(proxy.getUrl(), "UTF-8")));
-        } catch (UnsupportedEncodingException e) {
-            throw new RuntimeException(e);
-        }
+        assertThat(driver.getCurrentUrl(), containsString("client_id=" + URLEncoder.encode(proxy.getUrl(), StandardCharsets.UTF_8)));
 
         loginPage.login(bc.getUserLogin(), bc.getUserPassword());
-        waitForPage(driver, "account management", true);
-        accountUpdateProfilePage.assertCurrent();
+        waitForPage(driver, "AUTH_RESPONSE", true);
+        appPage.assertCurrent();
     }
 
     @Test

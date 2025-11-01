@@ -16,9 +16,16 @@
  */
 package org.keycloak.services.resources.admin;
 
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponses;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
-import org.jboss.resteasy.annotations.cache.NoCache;
-import org.jboss.resteasy.spi.ResteasyProviderFactory;
+import org.jboss.resteasy.reactive.NoCache;
 import org.keycloak.events.admin.OperationType;
 import org.keycloak.events.admin.ResourceType;
 import org.keycloak.models.ClientScopeModel;
@@ -27,20 +34,24 @@ import org.keycloak.models.ModelDuplicateException;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.models.utils.RepresentationToModel;
+import org.keycloak.protocol.LoginProtocol;
+import org.keycloak.protocol.LoginProtocolFactory;
 import org.keycloak.representations.idm.ClientScopeRepresentation;
 import org.keycloak.services.ErrorResponse;
-import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
+import org.keycloak.services.resources.KeycloakOpenAPI;
+import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
 
-import javax.ws.rs.Consumes;
-import javax.ws.rs.GET;
-import javax.ws.rs.NotFoundException;
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+
+import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
@@ -50,17 +61,18 @@ import java.util.stream.Stream;
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
  * @version $Revision: 1 $
  */
+@Extension(name = KeycloakOpenAPI.Profiles.ADMIN, value = "")
 public class ClientScopesResource {
     protected static final Logger logger = Logger.getLogger(ClientScopesResource.class);
-    protected RealmModel realm;
-    private AdminPermissionEvaluator auth;
-    private AdminEventBuilder adminEvent;
+    protected final RealmModel realm;
+    private final AdminPermissionEvaluator auth;
+    private final AdminEventBuilder adminEvent;
 
-    @Context
-    protected KeycloakSession session;
+    protected final KeycloakSession session;
 
-    public ClientScopesResource(RealmModel realm, AdminPermissionEvaluator auth, AdminEventBuilder adminEvent) {
-        this.realm = realm;
+    public ClientScopesResource(KeycloakSession session, AdminPermissionEvaluator auth, AdminEventBuilder adminEvent) {
+        this.session = session;
+        this.realm = session.getContext().getRealm();
         this.auth = auth;
         this.adminEvent = adminEvent.resource(ResourceType.CLIENT_SCOPE);
     }
@@ -73,6 +85,12 @@ public class ClientScopesResource {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @NoCache
+    @Tag(name = KeycloakOpenAPI.Admin.Tags.CLIENT_SCOPES)
+    @Operation(summary = "Get client scopes belonging to the realm Returns a list of client scopes belonging to the realm")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "", content = @Content(schema = @Schema(implementation = ClientScopeRepresentation.class, type = SchemaType.ARRAY))),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public Stream<ClientScopeRepresentation> getClientScopes() {
         auth.clients().requireListClientScopes();
 
@@ -92,18 +110,30 @@ public class ClientScopesResource {
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     @NoCache
+    @Tag(name = KeycloakOpenAPI.Admin.Tags.CLIENT_SCOPES)
+    @Operation(summary = "Create a new client scope Client Scope’s name must be unique!")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "201", description = "Created"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "409", description = "Conflict")
+    })
     public Response createClientScope(ClientScopeRepresentation rep) {
         auth.clients().requireManageClientScopes();
         ClientScopeResource.validateClientScopeName(rep.getName());
+        ClientScopeResource.validateClientScopeProtocol(session, rep.getProtocol());
         ClientScopeResource.validateDynamicClientScope(rep);
         try {
-            ClientScopeModel clientModel = RepresentationToModel.createClientScope(session, realm, rep);
+            LoginProtocolFactory loginProtocolFactory = //
+                    (LoginProtocolFactory) session.getKeycloakSessionFactory().getProviderFactory(LoginProtocol.class,
+                                                                                                  rep.getProtocol());
+            Optional.ofNullable(loginProtocolFactory).ifPresent(lp -> lp.addClientScopeDefaults(rep));
+            ClientScopeModel clientScope = RepresentationToModel.createClientScope(realm, rep);
 
-            adminEvent.operation(OperationType.CREATE).resourcePath(session.getContext().getUri(), clientModel.getId()).representation(rep).success();
+            adminEvent.operation(OperationType.CREATE).resourcePath(session.getContext().getUri(), clientScope.getId()).representation(rep).success();
 
-            return Response.created(session.getContext().getUri().getAbsolutePathBuilder().path(clientModel.getId()).build()).build();
+            return Response.created(session.getContext().getUri().getAbsolutePathBuilder().path(clientScope.getId()).build()).build();
         } catch (ModelDuplicateException e) {
-            return ErrorResponse.exists("Client Scope " + rep.getName() + " already exists");
+            throw ErrorResponse.exists("Client Scope " + rep.getName() + " already exists");
         }
     }
 
@@ -113,17 +143,15 @@ public class ClientScopesResource {
      * @param id id of client scope (not name)
      * @return
      */
-    @Path("{id}")
+    @Path("{client-scope-id}")
     @NoCache
-    public ClientScopeResource getClientScope(final @PathParam("id") String id) {
+    public ClientScopeResource getClientScope(final @PathParam("client-scope-id") String id) {
         auth.clients().requireListClientScopes();
         ClientScopeModel clientModel = realm.getClientScopeById(id);
         if (clientModel == null) {
             throw new NotFoundException("Could not find client scope");
         }
-        ClientScopeResource clientResource = new ClientScopeResource(realm, auth, clientModel, session, adminEvent);
-        ResteasyProviderFactory.getInstance().injectProperties(clientResource);
-        return clientResource;
+        return new ClientScopeResource(realm, auth, clientModel, session, adminEvent);
     }
 
 }

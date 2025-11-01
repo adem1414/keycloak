@@ -1,63 +1,47 @@
 name: Trivy
+
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 6 * * *"
 
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+  
 jobs:
-  quarkus-dist:
-    name: Vulnerability scanner for Quarkus distribution images
-    runs-on: "ubuntu-18.04"
+
+  analysis:
+    name: Vulnerability scanner for nightly containers
+    runs-on: ubuntu-latest
+    if: github.repository == 'keycloak/keycloak'
+    strategy:
+      matrix:
+        container: [keycloak, keycloak-operator]
+      fail-fast: false
+    permissions:
+      security-events: write # Required for SARIF uploads
     steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@d63413b0a4a4482237085319f7f4a1ce99a8f2ac
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # 0.33.1
         with:
-          image-ref: 'quay.io/keycloak/keycloak:nightly'
-          format: 'template'
-          template: '@/contrib/sarif.tpl'
-          output: 'trivy-results.sarif'
-          severity: 'MEDIUM,CRITICAL,HIGH'
+          image-ref: quay.io/keycloak/${{ matrix.container }}:nightly
+          format: sarif
+          output: trivy-results.sarif
+          severity: MEDIUM,CRITICAL,HIGH
           ignore-unfixed: true
+          version: v0.57.1
+          timeout: 15m
+        env:
+          TRIVY_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-db
+          TRIVY_JAVA_DB_REPOSITORY: public.ecr.aws/aquasecurity/trivy-java-db
 
       - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2.1.29
+        uses: github/codeql-action/upload-sarif@f443b600d91635bebf5b0d9ebc620189c0d6fba5 # v4.30.8
         with:
-          sarif_file: 'trivy-results.sarif'
-
-  legacy-dist:
-    name: Vulnerability scanner for WildFly distribution images
-    runs-on: "ubuntu-18.04"
-    steps:
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@d63413b0a4a4482237085319f7f4a1ce99a8f2ac
-        with:
-          image-ref: 'quay.io/keycloak/keycloak:legacy'
-          format: 'template'
-          template: '@/contrib/sarif.tpl'
-          output: 'legacy-results.sarif'
-          severity: 'MEDIUM,CRITICAL,HIGH'
-          ignore-unfixed: true
-
-      - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2.1.29
-        with:
-          sarif_file: 'legacy-results.sarif'
-
-  keycloak-operator:
-    name: Vulnerability scanner for Keycloak Operator distribution images
-    runs-on: "ubuntu-18.04"
-    steps:
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@d63413b0a4a4482237085319f7f4a1ce99a8f2ac
-        with:
-          image-ref: 'quay.io/keycloak/keycloak-operator:nightly'
-          format: 'template'
-          template: '@/contrib/sarif.tpl'
-          output: 'operator-results.sarif'
-          severity: 'MEDIUM,CRITICAL,HIGH'
-          ignore-unfixed: true
-
-      - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2.1.29
-        with:
-          sarif_file: 'operator-results.sarif'
+          sarif_file: trivy-results.sarif
+          category: ${{ matrix.container }}

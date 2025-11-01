@@ -18,7 +18,6 @@
 package org.keycloak.authentication.authenticators.browser;
 
 import org.jboss.logging.Logger;
-import org.keycloak.OAuth2Constants;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationProcessor;
 import org.keycloak.authentication.Authenticator;
@@ -31,11 +30,8 @@ import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.services.Urls;
 import org.keycloak.services.managers.ClientSessionCode;
 
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.core.Response;
 import java.net.URI;
-import java.util.Objects;
-import java.util.Optional;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -74,21 +70,24 @@ public class IdentityProviderAuthenticator implements Authenticator {
         }
     }
 
-    private void redirect(AuthenticationFlowContext context, String providerId) {
-        Optional<IdentityProviderModel> idp = context.getRealm().getIdentityProvidersStream()
-                .filter(IdentityProviderModel::isEnabled)
-                .filter(identityProvider -> Objects.equals(providerId, identityProvider.getAlias()))
-                .findFirst();
-        if (idp.isPresent()) {
+    protected void redirect(AuthenticationFlowContext context, String providerId) {
+        String loginHint = context.getAuthenticationSession().getClientNote(OIDCLoginProtocol.LOGIN_HINT_PARAM);
+        redirect(context, providerId, loginHint);
+    }
+
+    protected void redirect(AuthenticationFlowContext context, String providerId, String loginHint) {
+        IdentityProviderModel idp = context.getSession().identityProviders().getByAlias(providerId);
+        if (idp != null && idp.isEnabled()) {
             String accessCode = new ClientSessionCode<>(context.getSession(), context.getRealm(), context.getAuthenticationSession()).getOrGenerateCode();
             String clientId = context.getAuthenticationSession().getClient().getClientId();
             String tabId = context.getAuthenticationSession().getTabId();
-            URI location = Urls.identityProviderAuthnRequest(context.getUriInfo().getBaseUri(), providerId, context.getRealm().getName(), accessCode, clientId, tabId);
+            String clientData = AuthenticationProcessor.getClientData(context.getSession(), context.getAuthenticationSession());
+            URI location = Urls.identityProviderAuthnRequest(context.getUriInfo().getBaseUri(), providerId, context.getRealm().getName(), accessCode, clientId, tabId, clientData, loginHint);
             Response response = Response.seeOther(location)
                     .build();
             // will forward the request to the IDP with prompt=none if the IDP accepts forwards with prompt=none.
             if ("none".equals(context.getAuthenticationSession().getClientNote(OIDCLoginProtocol.PROMPT_PARAM)) &&
-                    Boolean.valueOf(idp.get().getConfig().get(ACCEPTS_PROMPT_NONE))) {
+                    Boolean.parseBoolean(idp.getConfig().get(ACCEPTS_PROMPT_NONE))) {
                 context.getAuthenticationSession().setAuthNote(AuthenticationProcessor.FORWARDED_PASSIVE_LOGIN, "true");
             }
             LOG.debugf("Redirecting to %s", providerId);

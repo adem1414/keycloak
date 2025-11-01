@@ -19,17 +19,17 @@ package org.keycloak.broker.provider.mappersync;
 
 import org.keycloak.broker.provider.ConfigConstants;
 import org.keycloak.models.GroupModel;
-import org.keycloak.models.RealmModel;
-import org.keycloak.models.utils.KeycloakModelUtils;
 
-import java.util.function.Consumer;
+import java.util.Map;
+
+import static org.keycloak.models.utils.KeycloakModelUtils.GROUP_PATH_SEPARATOR;
 
 /**
  * Updates a group reference in a mapper config, when the path of a group changes.
  *
  * @author <a href="mailto:daniel.fesenmeyer@bosch.io">Daniel Fesenmeyer</a>
  */
-public class GroupConfigPropertyByPathSynchronizer extends AbstractConfigPropertySynchronizer<GroupModel.GroupPathChangeEvent> {
+public class GroupConfigPropertyByPathSynchronizer implements ConfigSynchronizer<GroupModel.GroupPathChangeEvent> {
 
     public static final GroupConfigPropertyByPathSynchronizer INSTANCE = new GroupConfigPropertyByPathSynchronizer();
 
@@ -43,25 +43,27 @@ public class GroupConfigPropertyByPathSynchronizer extends AbstractConfigPropert
     }
 
     @Override
-    public RealmModel extractRealm(GroupModel.GroupPathChangeEvent event) {
-        return event.getRealm();
+    public void handleEvent(GroupModel.GroupPathChangeEvent event) {
+
+        // first find all mappers that have a group config property that maps exactly to the changed path.
+        event.getKeycloakSession().identityProviders().getMappersStream(Map.of(ConfigConstants.GROUP, event.getPreviousPath()), null, null)
+                .forEach(idpMapper -> {
+                    idpMapper.getConfig().put(ConfigConstants.GROUP, event.getNewPath());
+                    logEventProcessed(ConfigConstants.GROUP, event.getPreviousPath(), event.getNewPath(), event.getRealm().getName(),
+                            idpMapper.getName(), idpMapper.getIdentityProviderAlias());
+                    event.getKeycloakSession().identityProviders().updateMapper(idpMapper);
+                });
+
+        // then find all mappers that have a group config that maps to a sub-path of the changed path.
+        event.getKeycloakSession().identityProviders().getMappersStream(
+                Map.of(ConfigConstants.GROUP, event.getPreviousPath() + GROUP_PATH_SEPARATOR + "*"), null, null)
+                .forEach(idpMapper -> {
+                    String currentGroupPath = idpMapper.getConfig().get(ConfigConstants.GROUP);
+                    String newGroupPath = event.getNewPath() + currentGroupPath.substring(event.getPreviousPath().length());
+                    idpMapper.getConfig().put(ConfigConstants.GROUP, newGroupPath);
+                    logEventProcessed(ConfigConstants.GROUP, currentGroupPath, newGroupPath, event.getRealm().getName(),
+                            idpMapper.getName(), idpMapper.getIdentityProviderAlias());
+                    event.getKeycloakSession().identityProviders().updateMapper(idpMapper);
+                });
     }
-
-    @Override
-    public String getConfigPropertyName() {
-        return ConfigConstants.GROUP;
-    }
-
-    @Override
-    protected void updateConfigPropertyIfNecessary(GroupModel.GroupPathChangeEvent event,
-            String currentPropertyValue, Consumer<String> propertyUpdater) {
-        String configuredGroupPath = KeycloakModelUtils.normalizeGroupPath(currentPropertyValue);
-
-        String previousGroupPath = event.getPreviousPath();
-        if (previousGroupPath.equals(configuredGroupPath)) {
-            String newPath = event.getNewPath();
-            propertyUpdater.accept(newPath);
-        }
-    }
-
 }

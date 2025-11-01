@@ -2,10 +2,7 @@ package org.keycloak.theme;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.Reader;
 import java.net.URL;
-import java.nio.charset.Charset;
 import java.util.Locale;
 import java.util.Properties;
 
@@ -44,21 +41,7 @@ public class ClasspathThemeResourceProviderFactory implements ThemeResourceProvi
 
     @Override
     public InputStream getResourceAsStream(String path) throws IOException {
-        return getResourceAsStream(path, classLoader.getResource(THEME_RESOURCES_RESOURCES));
-    }
-
-    protected InputStream getResourceAsStream(String path, URL rootResourceURL) throws IOException {
-        if (rootResourceURL == null) {
-            return null;
-        }
-        final String rootPath = rootResourceURL.getPath();
-        final URL resourceURL = classLoader.getResource(THEME_RESOURCES_RESOURCES + path);
-        if(resourceURL == null || !resourceURL.getPath().startsWith(rootPath)) {
-            return null;
-        }
-        else {
-            return resourceURL.openConnection().getInputStream();
-        }
+        return ResourceLoader.getResourceAsStream(THEME_RESOURCES_RESOURCES, path);
     }
 
     @Override
@@ -71,10 +54,8 @@ public class ClasspathThemeResourceProviderFactory implements ThemeResourceProvi
 
     protected void loadMessages(Properties messages, URL resource) throws IOException {
         if (resource != null) {
-            Charset encoding = PropertiesUtil.detectEncoding(resource.openStream());
-            // detectEncoding closes the stream
-            try (Reader reader = new InputStreamReader(resource.openStream(), encoding)) {
-                messages.load(reader);
+            try (InputStream stream = resource.openStream()) {
+                PropertiesUtil.readCharsetAware(messages, stream);
             }
         }
     }

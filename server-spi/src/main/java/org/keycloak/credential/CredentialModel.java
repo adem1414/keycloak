@@ -19,14 +19,13 @@ package org.keycloak.credential;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import org.keycloak.common.util.Base64;
 import org.keycloak.common.util.MultivaluedHashMap;
-import org.keycloak.models.credential.PasswordCredentialModel;
 import org.keycloak.util.JsonSerialization;
 
 /**
@@ -59,6 +58,7 @@ public class CredentialModel implements Serializable {
     public static final String CLIENT_CERT = "cert";
     public static final String KERBEROS = "kerberos";
 
+    public static final String USER_LABEL = "userLabel";
 
     private String id;
     private String type;
@@ -68,6 +68,8 @@ public class CredentialModel implements Serializable {
     private String secretData;
     private String credentialData;
 
+    private String federationLink;
+
     public CredentialModel shallowClone() {
         CredentialModel res = new CredentialModel();
         res.id = id;
@@ -76,6 +78,7 @@ public class CredentialModel implements Serializable {
         res.createdDate = createdDate;
         res.secretData = secretData;
         res.credentialData = credentialData;
+        res.federationLink = federationLink;
         return res;
     }
 
@@ -171,12 +174,8 @@ public class CredentialModel implements Serializable {
     @Deprecated
     @JsonIgnore
     public byte[] getSalt() {
-        try {
-            String saltStr = readString("salt", true);
-            return saltStr == null ? null : Base64.decode(saltStr);
-        } catch (IOException ioe) {
-            throw new RuntimeException(ioe);
-        }
+        String saltStr = readString("salt", true);
+        return saltStr == null ? null : Base64.getDecoder().decode(saltStr);
     }
 
     /**
@@ -184,7 +183,7 @@ public class CredentialModel implements Serializable {
      */
     @Deprecated
     public void setSalt(byte[] salt) {
-        String saltStr = salt == null ? null : Base64.encodeBytes(salt);
+        String saltStr = salt == null ? null : Base64.getEncoder().encodeToString(salt);
         writeProperty("salt", saltStr, true);
     }
 
@@ -294,6 +293,14 @@ public class CredentialModel implements Serializable {
     @Deprecated
     public void setConfig(MultivaluedHashMap<String, String> config) {
         writeProperty("config", config, false);
+    }
+
+    public void setFederationLink(String federationLink) {
+        this.federationLink = federationLink;
+    }
+
+    public String getFederationLink() {
+        return federationLink;
     }
 
     private Map<String, Object> readMapFromJson(boolean secret) {

@@ -27,6 +27,7 @@ import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.common.Profile;
 import org.keycloak.common.constants.KerberosConstants;
+import org.keycloak.common.constants.ServiceAccountConstants;
 import org.keycloak.models.Constants;
 import org.keycloak.models.LDAPConstants;
 import org.keycloak.models.credential.PasswordCredentialModel;
@@ -55,6 +56,7 @@ import org.keycloak.representations.idm.authorization.PolicyRepresentation;
 import org.keycloak.representations.idm.authorization.ResourceRepresentation;
 import org.keycloak.representations.idm.authorization.ResourceServerRepresentation;
 import org.keycloak.representations.idm.authorization.ScopeRepresentation;
+import org.keycloak.representations.userprofile.config.UPConfig;
 import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.storage.ldap.mappers.FullNameLDAPStorageMapper;
 import org.keycloak.storage.ldap.mappers.FullNameLDAPStorageMapperFactory;
@@ -62,7 +64,6 @@ import org.keycloak.storage.ldap.mappers.LDAPStorageMapper;
 import org.keycloak.testsuite.ProfileAssume;
 import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.client.KeycloakTestingClient;
-import org.keycloak.testsuite.util.RealmRepUtil;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -78,10 +79,11 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import org.hamcrest.Matcher;
+import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
 import org.keycloak.util.JsonSerialization;
 
-import static org.junit.Assert.assertThat;
+import static org.hamcrest.MatcherAssert.assertThat;
 
 /**
  *
@@ -107,7 +109,10 @@ public class ExportImportUtil {
 
         RealmResource realmRsc = adminClient.realm(realm.getRealm());
 
-        /* See KEYCLOAK-3104*/
+        UPConfig upConfig = realmRsc.users().userProfile().getConfiguration();
+        upConfig.setUnmanagedAttributePolicy(UPConfig.UnmanagedAttributePolicy.ENABLED);
+        realmRsc.users().userProfile().update(upConfig);
+
         UserRepresentation user = findByUsername(realmRsc, "loginclient");
         Assert.assertNotNull(user);
 
@@ -160,8 +165,8 @@ public class ExportImportUtil {
 
         // Test role mappings
         UserRepresentation admin = findByUsername(realmRsc, "admin");
-        // user without creation timestamp in import
-        Assert.assertNull(admin.getCreatedTimestamp());
+
+        Assert.assertNotNull(admin.getCreatedTimestamp());
         Set<RoleRepresentation> allRoles = allRoles(realmRsc, admin);
         Assert.assertEquals(3, allRoles.size());
         Assert.assertTrue(containsRole(allRoles, findRealmRole(realmRsc, "admin")));
@@ -170,7 +175,7 @@ public class ExportImportUtil {
 
         UserRepresentation wburke = findByUsername(realmRsc, "wburke");
         // user with creation timestamp in import
-        Assert.assertEquals(new Long(123654), wburke.getCreatedTimestamp());
+        Assert.assertEquals(Long.valueOf(123654), wburke.getCreatedTimestamp());
         allRoles = allRoles(realmRsc, wburke);
         Assert.assertEquals(2, allRoles.size());
         Assert.assertFalse(containsRole(allRoles, findRealmRole(realmRsc, "admin")));
@@ -183,7 +188,7 @@ public class ExportImportUtil {
 
         UserRepresentation loginclient = findByUsername(realmRsc, "loginclient");
         // user with creation timestamp as string in import
-        Assert.assertEquals(new Long(123655), loginclient.getCreatedTimestamp());
+        Assert.assertEquals(Long.valueOf(123655), loginclient.getCreatedTimestamp());
 
         UserRepresentation hashedPasswordUser = findByUsername(realmRsc, "hashedpassworduser");
         CredentialRepresentation password = realmRsc.users().get(hashedPasswordUser.getId()).credentials().stream()
@@ -252,7 +257,7 @@ public class ExportImportUtil {
             } else if ("google1".equals(federatedIdentityRep.getIdentityProvider())) {
                 googleFound = true;
                 Assert.assertEquals("google1", federatedIdentityRep.getUserId());
-                Assert.assertEquals("mysocialuser@gmail.com", federatedIdentityRep.getUserName());
+                Assert.assertEquals("mySocialUser@gmail.com", federatedIdentityRep.getUserName());
             } else if ("twitter1".equals(federatedIdentityRep.getIdentityProvider())) {
                 twitterFound = true;
                 Assert.assertEquals("twitter1", federatedIdentityRep.getUserId());
@@ -261,9 +266,15 @@ public class ExportImportUtil {
         }
         Assert.assertTrue(facebookFound && twitterFound && googleFound);
 
-        UserRepresentation foundSocialUser =  testingClient.testing().getUserByFederatedIdentity(realm.getRealm(), "facebook1", "facebook1", "fbuser1");
+        // make sure the username format is the same when importing
+        UserResource socialUserLowercase = realmRsc.users().get(findByUsername(realmRsc, "lowercasesocialuser").getId());
+        List<FederatedIdentityRepresentation> socialLowercaseLinks = socialUserLowercase.getFederatedIdentity();
+        Assert.assertEquals(1, socialLowercaseLinks.size());
+        Assert.assertEquals("lowercasesocialuser@gmail.com", socialLowercaseLinks.get(0).getUserName());
+
+        UserRepresentation foundSocialUser =  testingClient.testing(realm.getRealm()).getUserByFederatedIdentity(realm.getRealm(), "facebook1", "facebook1", "fbuser1");
         Assert.assertEquals(foundSocialUser.getUsername(), socialUser.toRepresentation().getUsername());
-        Assert.assertNull(testingClient.testing().getUserByFederatedIdentity(realm.getRealm(), "facebook", "not-existing", "not-existing"));
+        Assert.assertNull(testingClient.testing(realm.getRealm()).getUserByFederatedIdentity(realm.getRealm(), "facebook", "not-existing", "not-existing"));
 
         Assert.assertEquals("facebook1", facebookIdentityRep.getUserId());
         Assert.assertEquals("fbuser1", facebookIdentityRep.getUserName());
@@ -283,8 +294,8 @@ public class ExportImportUtil {
         Assert.assertEquals("3025", smtpConfig.get("port"));
 
         // Test identity providers
-        List<IdentityProviderRepresentation> identityProviders = realm.getIdentityProviders();
-        Assert.assertEquals(3, identityProviders.size());
+        List<IdentityProviderRepresentation> identityProviders = realmRsc.identityProviders().findAll();
+        Assert.assertEquals(4, identityProviders.size());
         IdentityProviderRepresentation google = null;
         for (IdentityProviderRepresentation idpRep : identityProviders) {
             if (idpRep.getAlias().equals("google1")) google = idpRep;
@@ -294,7 +305,7 @@ public class ExportImportUtil {
         Assert.assertEquals("google", google.getProviderId());
         Assert.assertTrue(google.isEnabled());
         Assert.assertEquals("googleId", google.getConfig().get("clientId"));
-        Assert.assertEquals("googleSecret", google.getConfig().get("clientSecret"));
+        Assert.assertEquals("**********", google.getConfig().get("clientSecret")); // secret is masked in GET call
 
         //////////////////
         // Test federation providers
@@ -326,15 +337,15 @@ public class ExportImportUtil {
         /////////////////
 
         // Assert that federation link wasn't created during import
-        Assert.assertNull(testingClient.testing().getUserByUsernameFromFedProviderFactory(realm.getRealm(), "wburke"));
+        Assert.assertNull(testingClient.testing(realm.getRealm()).getUserByUsernameFromFedProviderFactory(realm.getRealm(), "wburke"));
 
         // Test builtin authentication flows
-        AuthenticationFlowRepresentation clientFlow = testingClient.testing().getClientAuthFlow(realm.getRealm());
+        AuthenticationFlowRepresentation clientFlow = testingClient.testing(realm.getRealm()).getClientAuthFlow(realm.getRealm());
         Assert.assertEquals(DefaultAuthenticationFlows.CLIENT_AUTHENTICATION_FLOW, clientFlow.getAlias());
         Assert.assertNotNull(realmRsc.flows().getFlow(clientFlow.getId()));
         Assert.assertTrue(realmRsc.flows().getExecutions(clientFlow.getAlias()).size() > 0);
 
-        AuthenticationFlowRepresentation resetFlow = testingClient.testing().getResetCredFlow(realm.getRealm());
+        AuthenticationFlowRepresentation resetFlow = testingClient.testing(realm.getRealm()).getResetCredFlow(realm.getRealm());
         Assert.assertEquals(DefaultAuthenticationFlows.RESET_CREDENTIALS_FLOW, resetFlow.getAlias());
         Assert.assertNotNull(realmRsc.flows().getFlow(resetFlow.getId()));
         Assert.assertTrue(realmRsc.flows().getExecutions(resetFlow.getAlias()).size() > 0);
@@ -411,13 +422,13 @@ public class ExportImportUtil {
         Assert.assertFalse(application.isServiceAccountsEnabled());
         Assert.assertTrue(otherApp.isServiceAccountsEnabled());
 
-        if (ProfileAssume.isFeatureEnabled(Profile.Feature.AUTHORIZATION)) { 
+        if (ProfileAssume.isFeatureEnabled(Profile.Feature.AUTHORIZATION)) {
             Assert.assertTrue(testAppAuthzApp.isServiceAccountsEnabled());
-            Assert.assertNull(testingClient.testing().getUserByServiceAccountClient(realm.getRealm(), application.getClientId()));//session.users().getUserByServiceAccountClient(application));
-            UserRepresentation otherAppSA = testingClient.testing().getUserByServiceAccountClient(realm.getRealm(), otherApp.getClientId());//session.users().getUserByServiceAccountClient(otherApp);
+            Assert.assertNull(testingClient.testing(realm.getRealm()).getUserByServiceAccountClient(realm.getRealm(), application.getClientId()));//session.users().getUserByServiceAccountClient(application));
+            UserRepresentation otherAppSA = testingClient.testing(realm.getRealm()).getUserByServiceAccountClient(realm.getRealm(), otherApp.getClientId());//session.users().getUserByServiceAccountClient(otherApp);
             Assert.assertNotNull(otherAppSA);
             Assert.assertEquals("service-account-otherapp", otherAppSA.getUsername());
-            UserRepresentation testAppAuthzSA = testingClient.testing().getUserByServiceAccountClient(realm.getRealm(), testAppAuthzApp.getClientId());
+            UserRepresentation testAppAuthzSA = testingClient.testing(realm.getRealm()).getUserByServiceAccountClient(realm.getRealm(), testAppAuthzApp.getClientId());
             Assert.assertNotNull(testAppAuthzSA);
             Assert.assertEquals("service-account-test-app-authz", testAppAuthzSA.getUsername());
 
@@ -431,6 +442,11 @@ public class ExportImportUtil {
             assertAuthorizationSettingsOtherApp(realmRsc);
             assertAuthorizationSettingsTestAppAuthz(realmRsc);
         }
+
+        // Test Message Bundle
+        Map<String, String> localizations = adminClient.realm(realm.getRealm()).localization().getRealmLocalizationTexts("en");
+        Assert.assertEquals("value1", localizations.get("key1"));
+        Assert.assertEquals("value2", localizations.get("key2"));
     }
 
 
@@ -457,11 +473,11 @@ public class ExportImportUtil {
         Assert.assertTrue(includeInIdToken == null || Boolean.parseBoolean(includeInIdToken) == false);
     }
 
-    private static ProtocolMapperRepresentation findMapperByName(List<ProtocolMapperRepresentation> mappers, String type, String name) {
+    public static ProtocolMapperRepresentation findMapperByName(List<ProtocolMapperRepresentation> mappers, String type, String name) {
         if (mappers == null) {
             return null;
         }
-        
+
         for (ProtocolMapperRepresentation mapper : mappers) {
             if (mapper.getProtocol().equals(type) &&
                 mapper.getName().equals(name)) {
@@ -478,12 +494,10 @@ public class ExportImportUtil {
         return false;
     }
 
-    // Workaround for KEYCLOAK-3104.  For this realm, search() only works if username is null.
     private static UserRepresentation findByUsername(RealmResource realmRsc, String username) {
-        for (UserRepresentation user : realmRsc.users().search(null, 0, -1)) {
-            if (user.getUsername().equalsIgnoreCase(username)) return user;
-        }
-        return null;
+        List<UserRepresentation> usersByUsername = realmRsc.users().search(username);
+        MatcherAssert.assertThat(usersByUsername, Matchers.hasSize(1));
+        return usersByUsername.get(0);
     }
 
     private static Set<RoleRepresentation> allScopeMappings(ClientResource client) {
@@ -511,8 +525,8 @@ public class ExportImportUtil {
         Map<String, ClientMappingsRepresentation> clientRoles = client.getScopeMappings().getAll().getClientMappings();
         if (clientRoles == null) return clientScopeMappings;
 
-        for (String clientKey : clientRoles.keySet()) {
-            List<RoleRepresentation> clientRoleScopeMappings = clientRoles.get(clientKey).getMappings();
+        for (ClientMappingsRepresentation clientMappingsRepresentation : clientRoles.values()) {
+            List<RoleRepresentation> clientRoleScopeMappings = clientMappingsRepresentation.getMappings();
             if (clientRoleScopeMappings != null) clientScopeMappings.addAll(clientRoleScopeMappings);
         }
 
@@ -524,8 +538,8 @@ public class ExportImportUtil {
         Map<String, ClientMappingsRepresentation> clientRoles = client.getScopeMappings().getAll().getClientMappings();
         if (clientRoles == null) return clientScopeMappings;
 
-        for (String clientKey : clientRoles.keySet()) {
-            List<RoleRepresentation> clientRoleScopeMappings = clientRoles.get(clientKey).getMappings();
+        for (ClientMappingsRepresentation clientMappingsRepresentation : clientRoles.values()) {
+            List<RoleRepresentation> clientRoleScopeMappings = clientMappingsRepresentation.getMappings();
             if (clientRoleScopeMappings != null) clientScopeMappings.addAll(clientRoleScopeMappings);
         }
 
@@ -591,11 +605,11 @@ public class ExportImportUtil {
         Assert.assertNotNull(authzResource);
 
         List<ResourceRepresentation> resources = authzResource.resources().resources();
-        Assert.assertThat(resources.stream().map(ResourceRepresentation::getName).collect(Collectors.toList()),
+        assertThat(resources.stream().map(ResourceRepresentation::getName).collect(Collectors.toList()),
                 Matchers.containsInAnyOrder("Default Resource", "test"));
 
         List<PolicyRepresentation> policies = authzResource.policies().policies();
-        Assert.assertThat(policies.stream().map(PolicyRepresentation::getName).collect(Collectors.toList()),
+        assertThat(policies.stream().map(PolicyRepresentation::getName).collect(Collectors.toList()),
                 Matchers.containsInAnyOrder("User Policy", "Default Permission", "test-permission"));
     }
 
@@ -722,6 +736,8 @@ public class ExportImportUtil {
           OIDCLoginProtocolFactory.WEB_ORIGINS_SCOPE,
           OIDCLoginProtocolFactory.MICROPROFILE_JWT_SCOPE,
           OIDCLoginProtocolFactory.ACR_SCOPE,
+          OIDCLoginProtocolFactory.BASIC_SCOPE,
+          ServiceAccountConstants.SERVICE_ACCOUNT_SCOPE,
           SamlProtocolFactory.SCOPE_ROLE_LIST
         ));
 
@@ -743,7 +759,8 @@ public class ExportImportUtil {
           OAuth2Constants.SCOPE_EMAIL,
           OIDCLoginProtocolFactory.ROLES_SCOPE,
           OIDCLoginProtocolFactory.WEB_ORIGINS_SCOPE,
-          OIDCLoginProtocolFactory.ACR_SCOPE
+          OIDCLoginProtocolFactory.ACR_SCOPE,
+          OIDCLoginProtocolFactory.BASIC_SCOPE
         ));
 
         Set<String> optionalClientScopes = realm.getDefaultOptionalClientScopes()

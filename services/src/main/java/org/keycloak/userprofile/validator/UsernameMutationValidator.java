@@ -20,12 +20,11 @@ import java.util.List;
 
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
-import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.services.messages.Messages;
 import org.keycloak.services.validation.Validation;
 import org.keycloak.userprofile.AttributeContext;
+import org.keycloak.userprofile.Attributes;
 import org.keycloak.userprofile.UserProfileAttributeValidationContext;
-import org.keycloak.userprofile.UserProfileContext;
 import org.keycloak.validate.SimpleValidator;
 import org.keycloak.validate.ValidationContext;
 import org.keycloak.validate.ValidationError;
@@ -66,10 +65,10 @@ public class UsernameMutationValidator implements SimpleValidator {
         UserModel user = attributeContext.getUser();
         RealmModel realm = context.getSession().getContext().getRealm();
 
-        if (! KeycloakModelUtils.isUsernameCaseSensitive(realm)) value = value.toLowerCase();
-
-        if (!realm.isEditUsernameAllowed() && user != null && !value.equals(user.getFirstAttribute(UserModel.USERNAME))) {
-            if (realm.isRegistrationEmailAsUsername() && UserProfileContext.UPDATE_PROFILE.equals(attributeContext.getContext())) {
+        String valueLowercased = value.toLowerCase();
+        if (!realm.isEditUsernameAllowed() && user != null && !valueLowercased.equals(user.getFirstAttribute(UserModel.USERNAME))) {
+            Attributes attributes = attributeContext.getAttributes();
+            if (realm.isRegistrationEmailAsUsername() && valueLowercased.equals(attributes.getFirst(UserModel.EMAIL))) {
                 // if username changed is because email as username is allowed so no validation should happen for update profile
                 // it is expected that username changes when attributes are normalized by the provider
                 return context;

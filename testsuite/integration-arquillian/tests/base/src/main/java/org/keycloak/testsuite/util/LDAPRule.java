@@ -232,6 +232,8 @@ public class LDAPRule extends ExternalResource {
         switch (defaultProperties.getProperty(LDAPEmbeddedServer.PROPERTY_ENABLE_ANONYMOUS_ACCESS)) {
             case "true":
                 config.put(LDAPConstants.AUTH_TYPE, LDAPConstants.AUTH_TYPE_NONE);
+                config.remove(LDAPConstants.BIND_DN);
+                config.remove(LDAPConstants.BIND_CREDENTIAL);
                 break;
             default:
                 // Default to username + password LDAP authentication method
@@ -242,12 +244,13 @@ public class LDAPRule extends ExternalResource {
                 config.put(LDAPConstants.START_TLS, "true");
                 // Use truststore from TruststoreSPI also for StartTLS connections
                 config.put(LDAPConstants.USE_TRUSTSTORE_SPI, LDAPConstants.USE_TRUSTSTORE_ALWAYS);
+                config.put(LDAPConstants.CONNECTION_POOLING, "false");
                 break;
             default:
                 // Default to startTLS disabled
                 config.put(LDAPConstants.START_TLS, "false");
                 // By default use truststore from TruststoreSPI only for LDAP over SSL connections
-                config.put(LDAPConstants.USE_TRUSTSTORE_SPI, LDAPConstants.USE_TRUSTSTORE_LDAPS_ONLY);
+                config.put(LDAPConstants.USE_TRUSTSTORE_SPI, LDAPConstants.USE_TRUSTSTORE_ALWAYS);
         }
         switch (defaultProperties.getProperty(LDAPEmbeddedServer.PROPERTY_SET_CONFIDENTIALITY_REQUIRED)) {
             case "true":
@@ -303,5 +306,9 @@ public class LDAPRule extends ExternalResource {
             SSL,
             STARTTLS
         }
+    }
+
+    public boolean isEmbeddedServer() {
+        return ldapTestConfiguration.isStartEmbeddedLdapServer();
     }
 }

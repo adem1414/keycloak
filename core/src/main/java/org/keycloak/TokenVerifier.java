@@ -32,8 +32,12 @@ import org.keycloak.util.TokenUtil;
 
 import javax.crypto.SecretKey;
 
+import java.nio.charset.StandardCharsets;
 import java.security.PublicKey;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -107,31 +111,31 @@ public class TokenVerifier<T extends JsonWebToken> {
             }
 
             if (! this.realmUrl.equals(t.getIssuer())) {
-                throw new VerificationException("Invalid token issuer. Expected '" + this.realmUrl + "', but was '" + t.getIssuer() + "'");
+                throw new VerificationException("Invalid token issuer. Expected '" + this.realmUrl + "'");
             }
 
             return true;
         }
-    };
+    }
 
     public static class TokenTypeCheck implements Predicate<JsonWebToken> {
 
-        private static final TokenTypeCheck INSTANCE_BEARER = new TokenTypeCheck(TokenUtil.TOKEN_TYPE_BEARER);
+        private static final TokenTypeCheck INSTANCE_DEFAULT_TOKEN_TYPE = new TokenTypeCheck(Arrays.asList(TokenUtil.TOKEN_TYPE_BEARER));
 
-        private final String tokenType;
+        private final List<String> tokenTypes;
 
-        public TokenTypeCheck(String tokenType) {
-            this.tokenType = tokenType;
+        public TokenTypeCheck(List<String> tokenTypes) {
+            this.tokenTypes = tokenTypes;
         }
 
         @Override
         public boolean test(JsonWebToken t) throws VerificationException {
-            if (! tokenType.equalsIgnoreCase(t.getType())) {
-                throw new VerificationException("Token type is incorrect. Expected '" + tokenType + "' but was '" + t.getType() + "'");
+            for (String tokenType : tokenTypes) {
+                if (tokenType.equalsIgnoreCase(t.getType())) return true;
             }
-            return true;
+            throw new VerificationException("Token type is incorrect. Expected '" + tokenTypes.toString() + "' but was '" + t.getType() + "'");
         }
-    };
+    }
 
 
     public static class AudienceCheck implements Predicate<JsonWebToken> {
@@ -159,7 +163,7 @@ public class TokenVerifier<T extends JsonWebToken> {
 
             throw new VerificationException("Expected audience not available in the token");
         }
-    };
+    }
 
 
     public static class IssuedForCheck implements Predicate<JsonWebToken> {
@@ -190,7 +194,7 @@ public class TokenVerifier<T extends JsonWebToken> {
     private PublicKey publicKey;
     private SecretKey secretKey;
     private String realmUrl;
-    private String expectedTokenType = TokenUtil.TOKEN_TYPE_BEARER;
+    private List<String> expectedTokenType = Arrays.asList(TokenUtil.TOKEN_TYPE_BEARER, TokenUtil.TOKEN_TYPE_DPOP);
     private boolean checkTokenType = true;
     private boolean checkRealmUrl = true;
     private final LinkedList<Predicate<? super T>> checks = new LinkedList<>();
@@ -253,8 +257,7 @@ public class TokenVerifier<T extends JsonWebToken> {
     public TokenVerifier<T> withDefaultChecks()  {
         return withChecks(
           RealmUrlCheck.NULL_INSTANCE,
-          SUBJECT_EXISTS_CHECK,
-          TokenTypeCheck.INSTANCE_BEARER,
+          TokenTypeCheck.INSTANCE_DEFAULT_TOKEN_TYPE,
           IS_ACTIVE
         );
     }
@@ -315,7 +318,7 @@ public class TokenVerifier<T extends JsonWebToken> {
     /**
      * Sets the key for verification of HMAC-based signature.
      * @param secretKey
-     * @return 
+     * @return
      */
     public TokenVerifier<T> secretKey(SecretKey secretKey) {
         this.secretKey = secretKey;
@@ -344,8 +347,8 @@ public class TokenVerifier<T extends JsonWebToken> {
      *
      * @return This token verifier
      */
-    public TokenVerifier<T> tokenType(String tokenType) {
-        this.expectedTokenType = tokenType;
+    public TokenVerifier<T> tokenType(List<String> tokenTypes) {
+        this.expectedTokenType = tokenTypes;
         return replaceCheck(TokenTypeCheck.class, this.checkTokenType, new TokenTypeCheck(expectedTokenType));
     }
 
@@ -430,7 +433,7 @@ public class TokenVerifier<T extends JsonWebToken> {
     public void verifySignature() throws VerificationException {
         if (this.verifier != null) {
             try {
-                if (!verifier.verify(jws.getEncodedSignatureInput().getBytes("UTF-8"), jws.getSignature())) {
+                if (!verifier.verify(jws.getEncodedSignatureInput().getBytes(StandardCharsets.UTF_8), jws.getSignature())) {
                     throw new TokenSignatureInvalidException(token, "Invalid token signature");
                 }
             } catch (Exception e) {

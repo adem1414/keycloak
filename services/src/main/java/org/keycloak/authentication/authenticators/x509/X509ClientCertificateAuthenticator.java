@@ -19,22 +19,25 @@
 package org.keycloak.authentication.authenticators.x509;
 
 import java.security.cert.X509Certificate;
-import java.util.Enumeration;
 import java.util.LinkedList;
 import java.util.List;
-import javax.ws.rs.core.MultivaluedHashMap;
+import java.util.Map;
+import jakarta.ws.rs.core.MultivaluedHashMap;
 
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response;
 
+import org.jboss.logging.Logger;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.authenticators.browser.AbstractUsernameFormAuthenticator;
 import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
 import org.keycloak.forms.login.LoginFormsProvider;
 import org.keycloak.models.ModelDuplicateException;
+import org.keycloak.models.UserCredentialModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.utils.FormMessage;
+import org.keycloak.services.ServicesLogger;
 
 import static org.keycloak.authentication.authenticators.util.AuthenticatorUtils.getDisabledByBruteForceEventError;
 
@@ -44,6 +47,8 @@ import static org.keycloak.authentication.authenticators.util.AuthenticatorUtils
  *
  */
 public class X509ClientCertificateAuthenticator extends AbstractX509ClientCertificateAuthenticator {
+
+    private final static Logger logger = Logger.getLogger(X509ClientCertificateAuthenticator.class);
 
     @Override
     public void close() {
@@ -61,7 +66,7 @@ public class X509ClientCertificateAuthenticator extends AbstractX509ClientCertif
             if (certs == null || certs.length == 0) {
                 // No x509 client cert, fall through and
                 // continue processing the rest of the authentication flow
-                logger.debug("[X509ClientCertificateAuthenticator:authenticate] x509 client certificate is not available for mutual SSL.");
+                logger.debug("[authenticate] x509 client certificate is not available for mutual SSL.");
                 context.attempted();
                 return;
             }
@@ -74,7 +79,7 @@ public class X509ClientCertificateAuthenticator extends AbstractX509ClientCertif
                 config = new X509AuthenticatorConfigModel(context.getAuthenticatorConfig());
             }
             if (config == null) {
-                logger.warn("[X509ClientCertificateAuthenticator:authenticate] x509 Client Certificate Authentication configuration is not available.");
+                logger.warn("[authenticate] x509 Client Certificate Authentication configuration is not available.");
                 context.challenge(createInfoResponse(context, "X509 client authentication has not been configured yet"));
                 context.attempted();
                 return;
@@ -104,7 +109,7 @@ public class X509ClientCertificateAuthenticator extends AbstractX509ClientCertif
             Object userIdentity = getUserIdentityExtractor(config).extractUserIdentity(certs);
             if (userIdentity == null) {
                 context.getEvent().error(Errors.INVALID_USER_CREDENTIALS);
-                logger.warnf("[X509ClientCertificateAuthenticator:authenticate] Unable to extract user identity from certificate.");
+                logger.warnf("[authenticate] Unable to extract user identity from certificate.");
                 // TODO use specific locale to load error messages
                 String errorMessage = "Unable to extract user identity from specified certificate";
                 // TODO is calling form().setErrors enough to show errors on login screen?
@@ -120,7 +125,7 @@ public class X509ClientCertificateAuthenticator extends AbstractX509ClientCertif
                 user = getUserIdentityToModelMapper(config).find(context, userIdentity);
             }
             catch(ModelDuplicateException e) {
-                logger.modelDuplicateException(e);
+                ServicesLogger.LOGGER.modelDuplicateException(e);
                 String errorMessage = "X509 certificate authentication's failed.";
                 // TODO is calling form().setErrors enough to show errors on login screen?
                 context.challenge(createErrorResponse(context, certs[0].getSubjectDN().getName(),
@@ -165,23 +170,21 @@ public class X509ClientCertificateAuthenticator extends AbstractX509ClientCertif
 
             // Check whether to display the identity confirmation
             if (!config.getConfirmationPageDisallowed()) {
-                // FIXME calling forceChallenge was the only way to display
+                // Calling forceChallenge was the only way to display
                 // a form to let users either choose the user identity from certificate
                 // or to ignore it and proceed to a normal login screen. Attempting
                 // to call the method "challenge" results in a wrong/unexpected behavior.
-                // The question is whether calling "forceChallenge" here is ok from
-                // the design viewpoint?
-                context.forceChallenge(createSuccessResponse(context, certs[0].getSubjectDN().getName()));
+                context.forceChallenge(createSuccessResponse(context, certs[0].getSubjectDN().toString()));
                 // Do not set the flow status yet, we want to display a form to let users
                 // choose whether to accept the identity from certificate or to specify username/password explicitly
             }
             else {
                 // Bypass the confirmation page and log the user in
-                context.success();
+                context.success(UserCredentialModel.CLIENT_CERT);
             }
         }
         catch(Exception e) {
-            logger.errorf("[X509ClientCertificateAuthenticator:authenticate] Exception: %s", e.getMessage());
+            logger.errorf(e, "[authenticate] Exception: %s", e.getMessage());
             context.attempted();
         }
     }
@@ -234,10 +237,9 @@ public class X509ClientCertificateAuthenticator extends AbstractX509ClientCertif
 
     private void dumpContainerAttributes(AuthenticationFlowContext context) {
 
-        Enumeration<String> attributeNames = context.getHttpRequest().getAttributeNames();
-        while(attributeNames.hasMoreElements()) {
-            String a = attributeNames.nextElement();
-            logger.tracef("[X509ClientCertificateAuthenticator:dumpContainerAttributes] \"%s\"", a);
+        Map<String, Object> attributeNames = context.getSession().getAttributes();
+        for (String name : attributeNames.keySet()) {
+            logger.tracef("[dumpContainerAttributes] \"%s\"", name);
         }
     }
 
@@ -268,7 +270,7 @@ public class X509ClientCertificateAuthenticator extends AbstractX509ClientCertif
         }
         if (context.getUser() != null) {
             recordX509CertificateAuditDataViaContextEvent(context);
-            context.success();
+            context.success(UserCredentialModel.CLIENT_CERT);
             return;
         }
         context.attempted();

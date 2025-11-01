@@ -17,6 +17,7 @@
 
 package org.keycloak.testsuite.pages.social;
 
+import org.keycloak.testsuite.util.WaitUtils;
 import org.openqa.selenium.Keys;
 import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.WebElement;
@@ -34,14 +35,14 @@ public class InstagramLoginPage extends AbstractSocialLoginPage {
     @FindBy(name = "password")
     private WebElement passwordInput;
 
-    @FindBy(xpath = "//button[text()='Save Info']")
+    @FindBy(xpath = "//button[text()='Save info']")
     private WebElement saveInfoBtn;
 
-    @FindBy(xpath = "//button[text()='Authorize']")
-    private WebElement authorizeBtn;
+    @FindBy(xpath = "//div[text()='Not now']")
+    private WebElement notNowBtn;
 
-    @FindBy(xpath = "//button[text()='Continue']")
-    private WebElement continueBtn;
+    @FindBy(xpath = "//div[@aria-label='Allow']")
+    private WebElement allowBtn;
 
     @Override
     public void login(String user, String password) {
@@ -50,26 +51,29 @@ public class InstagramLoginPage extends AbstractSocialLoginPage {
             usernameInput.sendKeys(user);
             passwordInput.sendKeys(password);
             passwordInput.sendKeys(Keys.RETURN);
-            pause(2000); // wait for the login screen a bit
+            pause(5000);
 
             try {
+                WaitUtils.waitUntilElement(saveInfoBtn).is().visible();
                 saveInfoBtn.click();
+                pause(3000);
             }
             catch (NoSuchElementException e) {
-                log.info("'Save Info' button not found, ignoring");
-                pause(2000); // wait for the login screen a bit
+                log.info("'Save info' button not found, ignoring");
+                pause(3000);
             }
         }
         catch (NoSuchElementException e) {
             log.info("Instagram is already logged in, just confirmation is expected");
         }
 
+        // Approval dialog
         try {
-            continueBtn.click();
-        }
-        catch (NoSuchElementException e) {
-            log.info("'Continue' button not found, trying 'Authorize'...");
-            authorizeBtn.click();
+            WaitUtils.waitUntilElement(allowBtn).is().visible();
+            allowBtn.click();
+        } catch (NoSuchElementException e) {
+            log.info("'Allow' button not found, ignoring");
         }
     }
+
 }

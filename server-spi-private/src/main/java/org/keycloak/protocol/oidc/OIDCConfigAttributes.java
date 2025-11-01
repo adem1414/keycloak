@@ -42,8 +42,11 @@ public final class OIDCConfigAttributes {
     public static final String USE_JWKS_STRING = "use.jwks.string";
 
     public static final String EXCLUDE_SESSION_STATE_FROM_AUTH_RESPONSE = "exclude.session.state.from.auth.response";
+    public static final String EXCLUDE_ISSUER_FROM_AUTH_RESPONSE = "exclude.issuer.from.auth.response";
 
     public static final String USE_MTLS_HOK_TOKEN = "tls.client.certificate.bound.access.tokens";
+
+    public static final String DPOP_BOUND_ACCESS_TOKENS = "dpop.bound.access.tokens";
 
     public static final String ID_TOKEN_SIGNED_RESPONSE_ALG = "id.token.signed.response.alg";
 
@@ -61,6 +64,7 @@ public final class OIDCConfigAttributes {
     public static final String PKCE_CODE_CHALLENGE_METHOD = "pkce.code.challenge.method";
 
     public static final String TOKEN_ENDPOINT_AUTH_SIGNING_ALG = "token.endpoint.auth.signing.alg";
+    public static final String TOKEN_ENDPOINT_AUTH_SIGNING_MAX_EXP = "token.endpoint.auth.signing.max.exp";
 
     public static final String BACKCHANNEL_LOGOUT_URL = "backchannel.logout.url";
 
@@ -74,6 +78,8 @@ public final class OIDCConfigAttributes {
 
     public static final String USE_LOWER_CASE_IN_TOKEN_RESPONSE = "token.response.type.bearer.lower-case";
 
+    public static final String USE_RFC9068_ACCESS_TOKEN_HEADER_TYPE = "access.token.header.type.rfc9068";
+
     public static final String ID_TOKEN_AS_DETACHED_SIGNATURE  = "id.token.as.detached.signature";
 
     public static final String AUTHORIZATION_SIGNED_RESPONSE_ALG = "authorization.signed.response.alg";
@@ -83,6 +89,13 @@ public final class OIDCConfigAttributes {
     public static final String FRONT_CHANNEL_LOGOUT_SESSION_REQUIRED = "frontchannel.logout.session.required";
 
     public static final String POST_LOGOUT_REDIRECT_URIS = "post.logout.redirect.uris";
+    
+    public static final String STANDARD_TOKEN_EXCHANGE_ENABLED = "standard.token.exchange.enabled";
+    public static final String STANDARD_TOKEN_EXCHANGE_REFRESH_ENABLED = "standard.token.exchange.enableRefreshRequestedTokenType";
+
+    public static final String JWT_AUTHORIZATION_GRANT_ENABLED = "oauth2.jwt.authorization.grant.enabled";
+    public static final String JWT_AUTHORIZATION_GRANT_IDP = "oauth2.jwt.authorization.grant.idp";
+
 
     private OIDCConfigAttributes() {
     }

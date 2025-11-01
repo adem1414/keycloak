@@ -16,9 +16,32 @@
  */
 package org.keycloak.services.resources.admin;
 
-import org.jboss.resteasy.annotations.cache.NoCache;
-import javax.ws.rs.NotFoundException;
-import org.jboss.resteasy.spi.ResteasyProviderFactory;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DefaultValue;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import java.net.URI;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Stream;
+
+import jakarta.ws.rs.core.Response.Status;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponses;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+import org.jboss.resteasy.reactive.NoCache;
+import org.keycloak.authorization.fgap.AdminPermissionsSchema;
 import org.keycloak.common.util.ObjectUtil;
 import org.keycloak.events.admin.OperationType;
 import org.keycloak.events.admin.ResourceType;
@@ -26,32 +49,20 @@ import org.keycloak.models.GroupModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ModelDuplicateException;
 import org.keycloak.models.RealmModel;
-import org.keycloak.models.utils.ModelToRepresentation;
+import org.keycloak.organization.utils.Organizations;
 import org.keycloak.representations.idm.GroupRepresentation;
 import org.keycloak.services.ErrorResponse;
-import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
+import org.keycloak.services.resources.KeycloakOpenAPI;
+import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
+import org.keycloak.services.resources.admin.fgap.GroupPermissionEvaluator;
+import org.keycloak.utils.GroupUtils;
 import org.keycloak.utils.SearchQueryUtils;
-
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DefaultValue;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
-import java.net.URI;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.stream.Stream;
 
 /**
  * @resource Groups
  * @author Bill Burke
  */
+@Extension(name = KeycloakOpenAPI.Profiles.ADMIN, value = "")
 public class GroupsResource {
 
     private final RealmModel realm;
@@ -68,31 +79,53 @@ public class GroupsResource {
     }
 
     /**
-     * Get group hierarchy.  Only name and ids are returned.
-     *
+     * Get group hierarchy.  Only {@code name} and {@code id} are returned.  {@code subGroups} are only returned when using the {@code search} or {@code q} parameter.
+     * If none of these parameters is provided, the top-level groups are returned without `{@code subGroups} being filled.
      * @return
      */
     @GET
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
+    @Tag(name = KeycloakOpenAPI.Admin.Tags.GROUPS)
+    @Operation( summary = "Get group hierarchy.  Only `name` and `id` are returned.  `subGroups` are only returned when using the `search` or `q` parameter. If none of these parameters is provided, the top-level groups are returned without `subGroups` being filled.")
     public Stream<GroupRepresentation> getGroups(@QueryParam("search") String search,
                                                  @QueryParam("q") String searchQuery,
                                                  @QueryParam("exact") @DefaultValue("false") Boolean exact,
                                                  @QueryParam("first") Integer firstResult,
                                                  @QueryParam("max") Integer maxResults,
-                                                 @QueryParam("briefRepresentation") @DefaultValue("true") boolean briefRepresentation) {
-        auth.groups().requireList();
+                                                 @QueryParam("briefRepresentation") @DefaultValue("true") boolean briefRepresentation,
+                                                 @QueryParam("populateHierarchy") @DefaultValue("true") boolean populateHierarchy,
+                                                 @Parameter(description = "Boolean which defines whether to return the count of subgroups for each group (default: true") @QueryParam("subGroupsCount") @DefaultValue("true") Boolean subGroupsCount) {
+        GroupPermissionEvaluator groupsEvaluator = auth.groups();
+        groupsEvaluator.requireList();
 
+        Stream<GroupModel> stream;
         if (Objects.nonNull(searchQuery)) {
             Map<String, String> attributes = SearchQueryUtils.getFields(searchQuery);
-            return ModelToRepresentation.searchGroupsByAttributes(session, realm, !briefRepresentation, attributes, firstResult, maxResults);
+            stream = session.groups().searchGroupsByAttributes(realm, attributes, firstResult, maxResults);
         } else if (Objects.nonNull(search)) {
-            return ModelToRepresentation.searchForGroupByName(session, realm, !briefRepresentation, search.trim(), exact, firstResult, maxResults);
-        } else if(Objects.nonNull(firstResult) && Objects.nonNull(maxResults)) {
-            return ModelToRepresentation.toGroupHierarchy(realm, !briefRepresentation, firstResult, maxResults);
+            stream = session.groups().searchForGroupByNameStream(realm, search.trim(), exact, firstResult, maxResults);
         } else {
-            return ModelToRepresentation.toGroupHierarchy(realm, !briefRepresentation);
+            stream = session.groups().getTopLevelGroupsStream(realm, firstResult, maxResults);
         }
+
+        if (populateHierarchy) {
+            return GroupUtils.populateGroupHierarchyFromSubGroups(session, realm, stream, !briefRepresentation, groupsEvaluator, subGroupsCount);
+        }
+
+        if (!AdminPermissionsSchema.SCHEMA.isAdminPermissionsEnabled(realm)) {
+            stream = stream.filter(groupsEvaluator::canView);
+        }
+
+        return stream.map(g -> {
+            GroupRepresentation rep = GroupUtils.toRepresentation(groupsEvaluator, g, !briefRepresentation);
+
+            if (subGroupsCount) {
+                return GroupUtils.populateSubGroupCount(g, rep);
+            }
+
+            return rep;
+        });
     }
 
     /**
@@ -101,15 +134,20 @@ public class GroupsResource {
      * @param id
      * @return
      */
-    @Path("{id}")
-    public GroupResource getGroupById(@PathParam("id") String id) {
+    @Path("{group-id}")
+    @Operation( summary = "Get group details. Does not expand hierarchy.  Subgroups will not be set.")
+    public GroupResource getGroupById(@PathParam("group-id") String id) {
         GroupModel group = realm.getGroupById(id);
+
         if (group == null) {
             throw new NotFoundException("Could not find group by id");
         }
-        GroupResource resource =  new GroupResource(realm, group, session, this.auth, adminEvent);
-        ResteasyProviderFactory.getInstance().injectProperties(resource);
-        return resource;
+
+        if (!Organizations.canManageOrganizationGroup(session, group)) {
+            throw ErrorResponse.error("Cannot manage organization related group via non Organization API.", Status.BAD_REQUEST);
+        }
+
+        return new GroupResource(realm, group, session, this.auth, adminEvent);
     }
 
     /**
@@ -121,8 +159,12 @@ public class GroupsResource {
     @NoCache
     @Path("count")
     @Produces(MediaType.APPLICATION_JSON)
+    @Tag(name = KeycloakOpenAPI.Admin.Tags.GROUPS)
+    @Operation( summary = "Returns the groups counts.")
     public Map<String, Long> getGroupCount(@QueryParam("search") String search,
                                            @QueryParam("top") @DefaultValue("false") boolean onlyTopGroups) {
+        GroupPermissionEvaluator groupsEvaluator = auth.groups();
+        groupsEvaluator.requireList();
         Long results;
         Map<String, Long> map = new HashMap<>();
         if (Objects.nonNull(search)) {
@@ -142,6 +184,15 @@ public class GroupsResource {
      */
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
+    @APIResponses(value = {
+        @APIResponse(responseCode = "201", description = "Created"),
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "400", description = "Bad Request"),
+        @APIResponse(responseCode = "409", description = "Conflict")
+    })
+    @Tag(name = KeycloakOpenAPI.Admin.Tags.GROUPS)
+    @Operation( summary = "create or add a top level realm groupSet or create child.",
+        description = "This will update the group and set the parent if it exists. Create it and set the parent if the group doesn’t exist.")
     public Response addTopLevelGroup(GroupRepresentation rep) {
         auth.groups().requireManage();
 
@@ -150,7 +201,7 @@ public class GroupsResource {
         String groupName = rep.getName();
 
         if (ObjectUtil.isBlank(groupName)) {
-            return ErrorResponse.error("Group name is missing", Response.Status.BAD_REQUEST);
+            throw ErrorResponse.error("Group name is missing", Response.Status.BAD_REQUEST);
         }
 
         try {
@@ -159,7 +210,9 @@ public class GroupsResource {
                 if (child == null) {
                     throw new NotFoundException("Could not find child by id");
                 }
-                realm.moveGroup(child, null);
+                if (child.getParentId() != null) {
+                    realm.moveGroup(child, null);
+                }
                 adminEvent.operation(OperationType.UPDATE).resourcePath(session.getContext().getUri());
             } else {
                 child = realm.createGroup(groupName);
@@ -172,7 +225,7 @@ public class GroupsResource {
                 adminEvent.operation(OperationType.CREATE).resourcePath(session.getContext().getUri(), child.getId());
             }
         } catch (ModelDuplicateException mde) {
-            return ErrorResponse.exists("Top level group named '" + groupName + "' already exists.");
+            throw ErrorResponse.exists("Top level group named '" + groupName + "' already exists.");
         }
 
         adminEvent.representation(rep).success();

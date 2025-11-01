@@ -17,21 +17,17 @@
 
 package org.keycloak.testsuite.federation.kerberos;
 
-import java.net.URI;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
-import javax.ws.rs.client.Entity;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.Response;
 
 import org.ietf.jgss.GSSCredential;
 import org.jboss.arquillian.graphene.page.Page;
 import org.junit.Assume;
 import org.junit.Test;
 import org.keycloak.admin.client.resource.ClientResource;
-import org.keycloak.common.Profile;
 import org.keycloak.common.constants.KerberosConstants;
 import org.keycloak.common.util.KerberosSerializationUtils;
 import org.keycloak.events.Details;
@@ -40,17 +36,17 @@ import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.utils.ModelToRepresentation;
 import org.keycloak.protocol.oidc.mappers.UserSessionNoteMapper;
 import org.keycloak.representations.AccessToken;
+import org.keycloak.representations.UserInfo;
 import org.keycloak.representations.idm.ProtocolMapperRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.storage.UserStorageProvider;
-import org.keycloak.testsuite.ActionURIUtils;
 import org.keycloak.testsuite.Assert;
 import org.keycloak.testsuite.admin.ApiUtil;
-import org.keycloak.testsuite.arquillian.annotation.DisableFeature;
 import org.keycloak.testsuite.pages.AppPage;
-import org.keycloak.testsuite.pages.LoginPage;
 import org.keycloak.testsuite.util.AccountHelper;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
 import org.keycloak.testsuite.util.TestAppHelper;
+
 
 import static org.keycloak.testsuite.admin.ApiUtil.findClientByClientId;
 
@@ -59,7 +55,6 @@ import static org.keycloak.testsuite.admin.ApiUtil.findClientByClientId;
  *
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
-@DisableFeature(value = Profile.Feature.ACCOUNT2, skipRestart = true) // TODO remove this (KEYCLOAK-16228)
 public abstract class AbstractKerberosSingleRealmTest extends AbstractKerberosTest {
 
     @Page
@@ -69,7 +64,7 @@ public abstract class AbstractKerberosSingleRealmTest extends AbstractKerberosTe
     public void spnegoNotAvailableTest() throws Exception {
         initHttpClient(false);
 
-        String kcLoginPageLocation = oauth.getLoginFormUrl();
+        String kcLoginPageLocation = oauth.loginForm().build();
 
         Response response = client.target(kcLoginPageLocation).request().get();
         Assert.assertEquals(401, response.getStatus());
@@ -186,7 +181,7 @@ public abstract class AbstractKerberosSingleRealmTest extends AbstractKerberosTe
         ProtocolMapperModel protocolMapper = UserSessionNoteMapper.createClaimMapper(KerberosConstants.GSS_DELEGATION_CREDENTIAL_DISPLAY_NAME,
                 KerberosConstants.GSS_DELEGATION_CREDENTIAL,
                 KerberosConstants.GSS_DELEGATION_CREDENTIAL, "String",
-                true, false);
+                true, false, true, true);
         ProtocolMapperRepresentation protocolMapperRep = ModelToRepresentation.toRepresentation(protocolMapper);
         ClientResource clientResource = findClientByClientId(testRealmResource(), "kerberos-app");
         Response response = clientResource.getProtocolMappers().createMapper(protocolMapperRep);
@@ -194,7 +189,8 @@ public abstract class AbstractKerberosSingleRealmTest extends AbstractKerberosTe
         response.close();
 
         // SPNEGO login
-        AccessToken token = assertSuccessfulSpnegoLogin("hnelson", "hnelson", "secret");
+        AccessTokenResponse tokenResponse = assertSuccessfulSpnegoLogin("hnelson", "hnelson", "secret");
+        AccessToken token = oauth.verifyToken(tokenResponse.getAccessToken());
 
         // Assert kerberos ticket in the accessToken can be re-used to authenticate against other 3rd party kerberos service (ApacheDS Server in this case)
         String serializedGssCredential = (String) token.getOtherClaims().get(KerberosConstants.GSS_DELEGATION_CREDENTIAL);
@@ -203,16 +199,25 @@ public abstract class AbstractKerberosSingleRealmTest extends AbstractKerberosTe
         String ldapResponse = invokeLdap(gssCredential, token.getPreferredUsername());
         Assert.assertEquals("Horatio Nelson", ldapResponse);
 
+        // Assert kerberos ticket also in userinfo endpoint
+        UserInfo userInfo = oauth.doUserInfoRequest(tokenResponse.getAccessToken()).getUserInfo();
+        Assert.assertEquals(serializedGssCredential, userInfo.getOtherClaims().get(KerberosConstants.GSS_DELEGATION_CREDENTIAL));
+        // Clear USER_INFO_REQUEST event
+        events.poll();
+
         // Logout
-        oauth.openLogout();
+        oauth.logoutForm().idTokenHint(tokenResponse.getIdToken()).open();
         events.poll();
 
         // Remove protocolMapper
         clientResource.getProtocolMappers().delete(protocolMapperId);
 
         // Login and assert delegated credential not anymore
-        token = assertSuccessfulSpnegoLogin("hnelson", "hnelson", "secret");
+        tokenResponse = assertSuccessfulSpnegoLogin("hnelson", "hnelson", "secret");
+        token = oauth.verifyToken(tokenResponse.getAccessToken());
         Assert.assertFalse(token.getOtherClaims().containsKey(KerberosConstants.GSS_DELEGATION_CREDENTIAL));
+        userInfo = oauth.doUserInfoRequest(tokenResponse.getAccessToken()).getUserInfo();
+        Assert.assertFalse(userInfo.getOtherClaims().containsKey(KerberosConstants.GSS_DELEGATION_CREDENTIAL));
 
         events.clear();
     }

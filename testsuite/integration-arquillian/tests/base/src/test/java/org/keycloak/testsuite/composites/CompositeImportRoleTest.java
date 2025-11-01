@@ -19,15 +19,14 @@ package org.keycloak.testsuite.composites;
 import org.jboss.arquillian.graphene.page.Page;
 import org.junit.Assert;
 import org.junit.Test;
-import org.keycloak.OAuth2Constants;
 import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.testsuite.pages.LoginPage;
-import org.keycloak.testsuite.util.OAuthClient.AccessTokenResponse;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
 
 import java.util.List;
 
-import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
+import static org.keycloak.testsuite.AbstractAdminTest.loadJson;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -39,9 +38,6 @@ public class CompositeImportRoleTest extends AbstractCompositeKeycloakTest {
     public void addTestRealms(List<RealmRepresentation> testRealms) {
         RealmRepresentation testRealm = loadJson(getClass().getResourceAsStream("/testcomposite.json"), RealmRepresentation.class);
         testRealm.setId("test");
-        testRealm.setPublicKey("MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCrVrCuTtArbgaZzL1hvh0xtL5mc7o0NqPVnYXkLvgcwiC3BjLGw1tGEGoJaXDuSaRllobm53JBhjx33UNv+5z/UMG4kytBWxheNVKnL6GgqlNabMaFfPLPCF8kAgKnsi79NMo+n6KnSY8YeUmec/p2vjO2NjsSAVcWEQMVhJ31LwIDAQAB");
-        testRealm.setPrivateKey("MIICXAIBAAKBgQCrVrCuTtArbgaZzL1hvh0xtL5mc7o0NqPVnYXkLvgcwiC3BjLGw1tGEGoJaXDuSaRllobm53JBhjx33UNv+5z/UMG4kytBWxheNVKnL6GgqlNabMaFfPLPCF8kAgKnsi79NMo+n6KnSY8YeUmec/p2vjO2NjsSAVcWEQMVhJ31LwIDAQABAoGAfmO8gVhyBxdqlxmIuglbz8bcjQbhXJLR2EoS8ngTXmN1bo2L90M0mUKSdc7qF10LgETBzqL8jYlQIbt+e6TH8fcEpKCjUlyq0Mf/vVbfZSNaVycY13nTzo27iPyWQHK5NLuJzn1xvxxrUeXI6A2WFpGEBLbHjwpx5WQG9A+2scECQQDvdn9NE75HPTVPxBqsEd2z10TKkl9CZxu10Qby3iQQmWLEJ9LNmy3acvKrE3gMiYNWb6xHPKiIqOR1as7L24aTAkEAtyvQOlCvr5kAjVqrEKXalj0Tzewjweuxc0pskvArTI2Oo070h65GpoIKLc9jf+UA69cRtquwP93aZKtW06U8dQJAF2Y44ks/mK5+eyDqik3koCI08qaC8HYq2wVl7G2QkJ6sbAaILtcvD92ToOvyGyeE0flvmDZxMYlvaZnaQ0lcSQJBAKZU6umJi3/xeEbkJqMfeLclD27XGEFoPeNrmdx0q10Azp4NfJAY+Z8KRyQCR2BEG+oNitBOZ+YXF9KCpH3cdmECQHEigJhYg+ykOvr1aiZUMFT72HU0jnmQe2FVekuG+LJUt2Tm7GtMjTFoGpf0JwrVuZN39fOYAlo+nTixgeW7X8Y=");
-
         testRealms.add(testRealm);
     }
 
@@ -51,11 +47,11 @@ public class CompositeImportRoleTest extends AbstractCompositeKeycloakTest {
     @Test
     public void testAppCompositeUser() throws Exception {
         oauth.realm("test");
-        oauth.clientId("APP_COMPOSITE_APPLICATION");
+        oauth.client("APP_COMPOSITE_APPLICATION", "password");
         oauth.doLogin("APP_COMPOSITE_USER", "password");
 
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
-        AccessTokenResponse response = oauth.doAccessTokenRequest(code, "password");
+        String code = oauth.parseLoginResponse().getCode();
+        AccessTokenResponse response = oauth.doAccessTokenRequest(code);
 
         Assert.assertEquals(200, response.getStatusCode());
 
@@ -75,11 +71,11 @@ public class CompositeImportRoleTest extends AbstractCompositeKeycloakTest {
     @Test
     public void testRealmAppCompositeUser() throws Exception {
         oauth.realm("test");
-        oauth.clientId("APP_ROLE_APPLICATION");
+        oauth.client("APP_ROLE_APPLICATION", "password");
         oauth.doLogin("REALM_APP_COMPOSITE_USER", "password");
 
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
-        AccessTokenResponse response = oauth.doAccessTokenRequest(code, "password");
+        String code = oauth.parseLoginResponse().getCode();
+        AccessTokenResponse response = oauth.doAccessTokenRequest(code);
 
         Assert.assertEquals(200, response.getStatusCode());
 
@@ -98,11 +94,11 @@ public class CompositeImportRoleTest extends AbstractCompositeKeycloakTest {
     @Test
     public void testRealmOnlyWithUserCompositeAppComposite() throws Exception {
         oauth.realm("test");
-        oauth.clientId("REALM_COMPOSITE_1_APPLICATION");
+        oauth.client("REALM_COMPOSITE_1_APPLICATION", "password");
         oauth.doLogin("REALM_COMPOSITE_1_USER", "password");
 
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
-        AccessTokenResponse response = oauth.doAccessTokenRequest(code, "password");
+        String code = oauth.parseLoginResponse().getCode();
+        AccessTokenResponse response = oauth.doAccessTokenRequest(code);
 
         Assert.assertEquals(200, response.getStatusCode());
 
@@ -120,11 +116,11 @@ public class CompositeImportRoleTest extends AbstractCompositeKeycloakTest {
     @Test
     public void testRealmOnlyWithUserCompositeAppRole() throws Exception {
         oauth.realm("test");
-        oauth.clientId("REALM_ROLE_1_APPLICATION");
+        oauth.client("REALM_ROLE_1_APPLICATION", "password");
         oauth.doLogin("REALM_COMPOSITE_1_USER", "password");
 
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
-        AccessTokenResponse response = oauth.doAccessTokenRequest(code, "password");
+        String code = oauth.parseLoginResponse().getCode();
+        AccessTokenResponse response = oauth.doAccessTokenRequest(code);
 
         Assert.assertEquals(200, response.getStatusCode());
 
@@ -141,11 +137,11 @@ public class CompositeImportRoleTest extends AbstractCompositeKeycloakTest {
     @Test
     public void testRealmOnlyWithUserRoleAppComposite() throws Exception {
         oauth.realm("test");
-        oauth.clientId("REALM_COMPOSITE_1_APPLICATION");
+        oauth.client("REALM_COMPOSITE_1_APPLICATION", "password");
         oauth.doLogin("REALM_ROLE_1_USER", "password");
 
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
-        AccessTokenResponse response = oauth.doAccessTokenRequest(code, "password");
+        String code = oauth.parseLoginResponse().getCode();
+        AccessTokenResponse response = oauth.doAccessTokenRequest(code);
 
         Assert.assertEquals(200, response.getStatusCode());
 

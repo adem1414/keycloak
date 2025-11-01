@@ -17,22 +17,22 @@
 
 package org.keycloak.models.jpa.entities;
 
-import javax.persistence.Access;
-import javax.persistence.AccessType;
-import javax.persistence.CascadeType;
-import javax.persistence.CollectionTable;
-import javax.persistence.Column;
-import javax.persistence.ElementCollection;
-import javax.persistence.Entity;
-import javax.persistence.FetchType;
-import javax.persistence.Id;
-import javax.persistence.JoinColumn;
-import javax.persistence.MapKey;
-import javax.persistence.MapKeyColumn;
-import javax.persistence.NamedQueries;
-import javax.persistence.NamedQuery;
-import javax.persistence.OneToMany;
-import javax.persistence.Table;
+import jakarta.persistence.Access;
+import jakarta.persistence.AccessType;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.CollectionTable;
+import jakarta.persistence.Column;
+import jakarta.persistence.ElementCollection;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.MapKey;
+import jakarta.persistence.MapKeyColumn;
+import jakarta.persistence.NamedQueries;
+import jakarta.persistence.NamedQuery;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.Table;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -49,6 +49,7 @@ import java.util.Set;
 @Entity
 @NamedQueries({
         @NamedQuery(name="getAllRealmIds", query="select realm.id from RealmEntity realm"),
+        @NamedQuery(name="getRealmIdsWithNameContaining", query="select realm.id from RealmEntity realm where LOWER(realm.name) like CONCAT('%', LOWER(:search), '%')"),
         @NamedQuery(name="getRealmIdByName", query="select realm.id from RealmEntity realm where realm.name = :name"),
         @NamedQuery(name="getRealmIdsWithProviderType", query="select distinct c.realm.id from ComponentEntity c where c.providerType = :providerType"),
 })
@@ -137,16 +138,16 @@ public class RealmEntity {
     protected String emailTheme;
 
     @OneToMany(cascade ={CascadeType.REMOVE}, orphanRemoval = true, mappedBy = "realm", fetch = FetchType.EAGER)
-    Collection<RealmAttributeEntity> attributes;
+    Collection<RealmAttributeEntity> attributes = new LinkedList<>();
 
     @OneToMany(cascade ={CascadeType.REMOVE}, orphanRemoval = true, mappedBy = "realm")
-    Collection<RequiredCredentialEntity> requiredCredentials;
+    Collection<RequiredCredentialEntity> requiredCredentials = new LinkedList<>();
 
     @OneToMany(cascade ={CascadeType.REMOVE}, orphanRemoval = true, mappedBy = "realm")
-    List<UserFederationProviderEntity> userFederationProviders;
+    List<UserFederationProviderEntity> userFederationProviders = new LinkedList<>();
 
     @OneToMany(cascade ={CascadeType.REMOVE}, orphanRemoval = true, mappedBy = "realm")
-    Collection<UserFederationMapperEntity> userFederationMappers;
+    Collection<UserFederationMapperEntity> userFederationMappers = new LinkedList<>();
 
     @ElementCollection
     @MapKeyColumn(name="NAME")
@@ -168,15 +169,15 @@ public class RealmEntity {
     @Column(name="VALUE")
     @CollectionTable(name="REALM_EVENTS_LISTENERS", joinColumns={ @JoinColumn(name="REALM_ID") })
     protected Set<String> eventsListeners;
-    
+
     @ElementCollection
     @Column(name="VALUE")
     @CollectionTable(name="REALM_ENABLED_EVENT_TYPES", joinColumns={ @JoinColumn(name="REALM_ID") })
     protected Set<String> enabledEventTypes;
-    
+
     @Column(name="ADMIN_EVENTS_ENABLED")
     protected boolean adminEventsEnabled;
-    
+
     @Column(name="ADMIN_EVENTS_DETAILS_ENABLED")
     protected boolean adminEventsDetailsEnabled;
 
@@ -187,22 +188,16 @@ public class RealmEntity {
     protected String defaultRoleId;
 
     @OneToMany(cascade ={CascadeType.REMOVE}, orphanRemoval = true, mappedBy = "realm")
-    protected List<IdentityProviderEntity> identityProviders;
+    Collection<AuthenticatorConfigEntity> authenticators = new LinkedList<>();
 
     @OneToMany(cascade ={CascadeType.REMOVE}, orphanRemoval = true, mappedBy = "realm")
-    Collection<IdentityProviderMapperEntity> identityProviderMappers;
+    Collection<RequiredActionProviderEntity> requiredActionProviders = new LinkedList<>();
 
     @OneToMany(cascade ={CascadeType.REMOVE}, orphanRemoval = true, mappedBy = "realm")
-    Collection<AuthenticatorConfigEntity> authenticators;
-
-    @OneToMany(cascade ={CascadeType.REMOVE}, orphanRemoval = true, mappedBy = "realm")
-    Collection<RequiredActionProviderEntity> requiredActionProviders;
-
-    @OneToMany(cascade ={CascadeType.REMOVE}, orphanRemoval = true, mappedBy = "realm")
-    Collection<AuthenticationFlowEntity> authenticationFlows;
+    Collection<AuthenticationFlowEntity> authenticationFlows = new LinkedList<>();
 
     @OneToMany(fetch = FetchType.LAZY, cascade ={CascadeType.ALL}, orphanRemoval = true, mappedBy = "realm")
-    Set<ComponentEntity> components;
+    Set<ComponentEntity> components = new HashSet<>();
 
     @Column(name="BROWSER_FLOW")
     protected String browserFlow;
@@ -237,9 +232,9 @@ public class RealmEntity {
     @Column(name="ALLOW_USER_MANAGED_ACCESS")
     private boolean allowUserManagedAccess;
 
-    @OneToMany(cascade ={CascadeType.REMOVE}, orphanRemoval = true, mappedBy = "realmId")
+    @OneToMany(cascade ={CascadeType.REMOVE}, orphanRemoval = true, mappedBy = "realm")
     @MapKey(name="locale")
-    Map<String, RealmLocalizationTextsEntity> realmLocalizationTexts;
+    Map<String, RealmLocalizationTextsEntity> realmLocalizationTexts = new HashMap<>();
 
     public String getId() {
         return id;
@@ -304,7 +299,7 @@ public class RealmEntity {
     public void setVerifyEmail(boolean verifyEmail) {
         this.verifyEmail = verifyEmail;
     }
-    
+
     public boolean isLoginWithEmailAllowed() {
         return loginWithEmailAllowed;
     }
@@ -312,7 +307,7 @@ public class RealmEntity {
     public void setLoginWithEmailAllowed(boolean loginWithEmailAllowed) {
         this.loginWithEmailAllowed = loginWithEmailAllowed;
     }
-    
+
     public boolean isDuplicateEmailsAllowed() {
         return duplicateEmailsAllowed;
     }
@@ -538,7 +533,7 @@ public class RealmEntity {
     public void setEventsListeners(Set<String> eventsListeners) {
         this.eventsListeners = eventsListeners;
     }
-    
+
     public Set<String> getEnabledEventTypes() {
         if (enabledEventTypes == null) {
             enabledEventTypes = new HashSet<>();
@@ -549,7 +544,7 @@ public class RealmEntity {
     public void setEnabledEventTypes(Set<String> enabledEventTypes) {
         this.enabledEventTypes = enabledEventTypes;
     }
-    
+
     public boolean isAdminEventsEnabled() {
         return adminEventsEnabled;
     }
@@ -615,22 +610,6 @@ public class RealmEntity {
         this.attributes = attributes;
     }
 
-    public List<IdentityProviderEntity> getIdentityProviders() {
-        if (identityProviders == null) {
-            identityProviders = new LinkedList<>();
-        }
-        return this.identityProviders;
-    }
-
-    public void setIdentityProviders(List<IdentityProviderEntity> identityProviders) {
-        this.identityProviders = identityProviders;
-    }
-
-    public void addIdentityProvider(IdentityProviderEntity entity) {
-        entity.setRealm(this);
-        getIdentityProviders().add(entity);
-    }
-
     public boolean isInternationalizationEnabled() {
         return internationalizationEnabled;
     }
@@ -658,24 +637,13 @@ public class RealmEntity {
         this.defaultLocale = defaultLocale;
     }
 
-    public Collection<IdentityProviderMapperEntity> getIdentityProviderMappers() {
-        if (identityProviderMappers == null) {
-            identityProviderMappers = new LinkedList<>();
-        }
-        return identityProviderMappers;
-    }
-
-    public void setIdentityProviderMappers(Collection<IdentityProviderMapperEntity> identityProviderMappers) {
-        this.identityProviderMappers = identityProviderMappers;
-    }
-
     public Collection<AuthenticatorConfigEntity> getAuthenticatorConfigs() {
         if (authenticators == null) {
             authenticators = new LinkedList<>();
         }
         return authenticators;
     }
-    
+
     public void setAuthenticatorConfigs(Collection<AuthenticatorConfigEntity> authenticators) {
         this.authenticators = authenticators;
     }
@@ -840,6 +808,13 @@ public class RealmEntity {
         if (!id.equals(that.getId())) return false;
 
         return true;
+    }
+
+    public String toString() {
+        return "Realm{" +
+                "id='" + id + '\'' +
+                ", name='" + name + '\'' +
+                '}';
     }
 
     @Override

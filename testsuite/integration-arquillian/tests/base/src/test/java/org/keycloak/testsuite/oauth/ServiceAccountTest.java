@@ -18,14 +18,12 @@
 package org.keycloak.testsuite.oauth;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.methods.CloseableHttpResponse;
 import org.hamcrest.Matchers;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
+import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.authentication.authenticators.client.ClientIdAndSecretAuthenticator;
 import org.keycloak.common.constants.ServiceAccountConstants;
@@ -35,8 +33,10 @@ import org.keycloak.events.Errors;
 import org.keycloak.events.EventType;
 import org.keycloak.jose.jws.JWSHeader;
 import org.keycloak.jose.jws.JWSInput;
+import org.keycloak.models.Constants;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.protocol.oidc.OIDCConfigAttributes;
+import org.keycloak.protocol.oidc.encode.AccessTokenContext;
 import org.keycloak.protocol.oidc.mappers.SHA256PairwiseSubMapper;
 import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.RefreshToken;
@@ -51,31 +51,36 @@ import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.util.ClientBuilder;
 import org.keycloak.testsuite.util.ClientManager;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
 import org.keycloak.testsuite.util.RealmBuilder;
 import org.keycloak.testsuite.util.TokenSignatureUtil;
 import org.keycloak.testsuite.util.UserBuilder;
 
-import javax.ws.rs.ClientErrorException;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.ClientErrorException;
+import org.keycloak.testsuite.util.oauth.LogoutResponse;
+
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.emptyOrNullString;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThat;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.Assert.assertTrue;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
 public class ServiceAccountTest extends AbstractKeycloakTest {
 
-    private static String userId;
+    private static String userIdClRefreshOn;
+    private static String userIdCl;
     private static String userName;
 
     @Rule
@@ -94,8 +99,6 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
     public void addTestRealms(List<RealmRepresentation> testRealms) {
 
         RealmBuilder realm = RealmBuilder.create().name("test")
-                .privateKey("MIICXAIBAAKBgQCrVrCuTtArbgaZzL1hvh0xtL5mc7o0NqPVnYXkLvgcwiC3BjLGw1tGEGoJaXDuSaRllobm53JBhjx33UNv+5z/UMG4kytBWxheNVKnL6GgqlNabMaFfPLPCF8kAgKnsi79NMo+n6KnSY8YeUmec/p2vjO2NjsSAVcWEQMVhJ31LwIDAQABAoGAfmO8gVhyBxdqlxmIuglbz8bcjQbhXJLR2EoS8ngTXmN1bo2L90M0mUKSdc7qF10LgETBzqL8jYlQIbt+e6TH8fcEpKCjUlyq0Mf/vVbfZSNaVycY13nTzo27iPyWQHK5NLuJzn1xvxxrUeXI6A2WFpGEBLbHjwpx5WQG9A+2scECQQDvdn9NE75HPTVPxBqsEd2z10TKkl9CZxu10Qby3iQQmWLEJ9LNmy3acvKrE3gMiYNWb6xHPKiIqOR1as7L24aTAkEAtyvQOlCvr5kAjVqrEKXalj0Tzewjweuxc0pskvArTI2Oo070h65GpoIKLc9jf+UA69cRtquwP93aZKtW06U8dQJAF2Y44ks/mK5+eyDqik3koCI08qaC8HYq2wVl7G2QkJ6sbAaILtcvD92ToOvyGyeE0flvmDZxMYlvaZnaQ0lcSQJBAKZU6umJi3/xeEbkJqMfeLclD27XGEFoPeNrmdx0q10Azp4NfJAY+Z8KRyQCR2BEG+oNitBOZ+YXF9KCpH3cdmECQHEigJhYg+ykOvr1aiZUMFT72HU0jnmQe2FVekuG+LJUt2Tm7GtMjTFoGpf0JwrVuZN39fOYAlo+nTixgeW7X8Y=")
-                .publicKey("MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCrVrCuTtArbgaZzL1hvh0xtL5mc7o0NqPVnYXkLvgcwiC3BjLGw1tGEGoJaXDuSaRllobm53JBhjx33UNv+5z/UMG4kytBWxheNVKnL6GgqlNabMaFfPLPCF8kAgKnsi79NMo+n6KnSY8YeUmec/p2vjO2NjsSAVcWEQMVhJ31LwIDAQAB")
                 .testEventListener();
 
         ClientRepresentation enabledApp = ClientBuilder.create()
@@ -139,11 +142,10 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
                 .username("test-user@localhost");
         realm.user(defaultUser);
 
-        userId = KeycloakModelUtils.generateId();
         userName = ServiceAccountConstants.SERVICE_ACCOUNT_USER_PREFIX + enabledApp.getClientId();
 
         UserBuilder serviceAccountUser = UserBuilder.create()
-                .id(userId)
+                .id(KeycloakModelUtils.generateId())
                 .username(userName)
                 .serviceAccountId(enabledApp.getClientId());
         realm.user(serviceAccountUser);
@@ -151,11 +153,18 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
         testRealms.add(realm.build());
     }
 
+    @Override
+    public void importTestRealms() {
+        super.importTestRealms();
+        userIdClRefreshOn = adminClient.realm("test").users().search(userName, true).get(0).getId();
+        userIdCl = adminClient.realm("test").users().search(ServiceAccountConstants.SERVICE_ACCOUNT_USER_PREFIX + "service-account-cl", true).get(0).getId();
+    }
+
     @Test
     public void clientCredentialsAuthSuccess() throws Exception {
-        oauth.clientId("service-account-cl-refresh-on");
+        oauth.client("service-account-cl-refresh-on", "secret1");
 
-        OAuthClient.AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest("secret1");
+        AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest();
 
         assertEquals(200, response.getStatusCode());
 
@@ -171,7 +180,7 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
 
         events.expectClientLogin()
                 .client("service-account-cl-refresh-on")
-                .user(userId)
+                .user(userIdClRefreshOn)
                 .session(accessToken.getSessionState())
                 .detail(Details.TOKEN_ID, accessToken.getId())
                 .detail(Details.REFRESH_TOKEN_ID, refreshToken.getId())
@@ -184,7 +193,7 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
         Assert.assertTrue(accessToken.getOtherClaims().containsKey(ServiceAccountConstants.CLIENT_ADDRESS));
         Assert.assertTrue(accessToken.getOtherClaims().containsKey(ServiceAccountConstants.CLIENT_HOST));
 
-        OAuthClient.AccessTokenResponse refreshedResponse = oauth.doRefreshTokenRequest(response.getRefreshToken(), "secret1");
+        AccessTokenResponse refreshedResponse = oauth.doRefreshTokenRequest(response.getRefreshToken());
 
         AccessToken refreshedAccessToken = oauth.verifyToken(refreshedResponse.getAccessToken());
         RefreshToken refreshedRefreshToken = oauth.parseRefreshToken(refreshedResponse.getRefreshToken());
@@ -192,16 +201,16 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
         assertEquals(accessToken.getSessionState(), refreshedAccessToken.getSessionState());
         assertEquals(accessToken.getSessionState(), refreshedRefreshToken.getSessionState());
 
-        events.expectRefresh(refreshToken.getId(), refreshToken.getSessionState()).user(userId).client("service-account-cl-refresh-on").assertEvent();
+        events.expectRefresh(refreshToken.getId(), refreshToken.getSessionState()).user(userIdClRefreshOn).client("service-account-cl-refresh-on").assertEvent();
     }
 
     // This is for the backwards compatibility only. By default, there won't be refresh token and hence there won't be availability for the logout
     @Test
     public void clientCredentialsLogout() throws Exception {
-        oauth.clientId("service-account-cl-refresh-on");
+        oauth.client("service-account-cl-refresh-on", "secret1");
         events.clear();
 
-        OAuthClient.AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest("secret1");
+        AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest();
 
         assertEquals(200, response.getStatusCode());
 
@@ -210,7 +219,7 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
 
         events.expectClientLogin()
                 .client("service-account-cl-refresh-on")
-                .user(userId)
+                .user(userIdClRefreshOn)
                 .session(accessToken.getSessionState())
                 .detail(Details.TOKEN_ID, accessToken.getId())
                 .detail(Details.REFRESH_TOKEN_ID, refreshToken.getId())
@@ -218,21 +227,21 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
                 .detail(Details.CLIENT_AUTH_METHOD, ClientIdAndSecretAuthenticator.PROVIDER_ID)
                 .assertEvent();
 
-        HttpResponse logoutResponse = oauth.doLogout(response.getRefreshToken(), "secret1");
-        assertEquals(204, logoutResponse.getStatusLine().getStatusCode());
+        LogoutResponse logoutResponse = oauth.doLogout(response.getRefreshToken());
+        assertTrue(logoutResponse.isSuccess());
         events.expectLogout(accessToken.getSessionState())
                 .client("service-account-cl-refresh-on")
-                .user(userId)
+                .user(userIdClRefreshOn)
                 .removeDetail(Details.REDIRECT_URI)
                 .assertEvent();
 
-        response = oauth.doRefreshTokenRequest(response.getRefreshToken(), "secret1");
+        response = oauth.doRefreshTokenRequest(response.getRefreshToken());
         assertEquals(400, response.getStatusCode());
         assertEquals("invalid_grant", response.getError());
 
         events.expectRefresh(refreshToken.getId(), refreshToken.getSessionState())
                 .client("service-account-cl-refresh-on")
-                .user(userId)
+                .user((String) null)
                 .removeDetail(Details.TOKEN_ID)
                 .removeDetail(Details.UPDATED_REFRESH_TOKEN_ID)
                 .error(Errors.INVALID_TOKEN).assertEvent();
@@ -240,9 +249,9 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
 
     @Test
     public void clientCredentialsInvalidClientCredentials() throws Exception {
-        oauth.clientId("service-account-cl");
+        oauth.client("service-account-cl", "secret2");
 
-        OAuthClient.AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest("secret2");
+        AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest();
 
         assertEquals(401, response.getStatusCode());
 
@@ -259,9 +268,9 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
 
     @Test
     public void clientCredentialsDisabledServiceAccount() throws Exception {
-        oauth.clientId("service-account-disabled");
+        oauth.client("service-account-disabled", "secret1");
 
-        OAuthClient.AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest("secret1");
+        AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest();
 
         assertEquals(401, response.getStatusCode());
 
@@ -283,9 +292,9 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
 
         ClientManager.realm(adminClient.realm("test")).clientId("service-account-cl-refresh-on").renameTo("updated-client");
 
-        oauth.clientId("updated-client");
+        oauth.client("updated-client", "secret1");
 
-        OAuthClient.AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest("secret1");
+        AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest();
 
         assertEquals(200, response.getStatusCode());
 
@@ -295,7 +304,7 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
         // Username updated after client ID changed
         events.expectClientLogin()
                 .client("updated-client")
-                .user(userId)
+                .user(userIdClRefreshOn)
                 .session(accessToken.getSessionState())
                 .detail(Details.TOKEN_ID, accessToken.getId())
                 .detail(Details.USERNAME, ServiceAccountConstants.SERVICE_ACCOUNT_USER_PREFIX + "updated-client")
@@ -309,29 +318,30 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
     @Test
     public void refreshTokenRefreshForDisabledServiceAccount() throws Exception {
         try {
-            oauth.clientId("service-account-cl");
-            OAuthClient.AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest("secret1");
+            oauth.client("service-account-cl", "secret1");
+            AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest();
             assertEquals(200, response.getStatusCode());
 
             ClientManager.realm(adminClient.realm("test")).clientId("service-account-cl").setServiceAccountsEnabled(false);
 
-            response = oauth.doRefreshTokenRequest(response.getRefreshToken(), "secret1");
+            response = oauth.doRefreshTokenRequest(response.getRefreshToken());
             assertEquals(400, response.getStatusCode());
         }
         finally {
             ClientManager.realm(adminClient.realm("test")).clientId("service-account-cl").setServiceAccountsEnabled(true);
             UserRepresentation user = ClientManager.realm(adminClient.realm("test")).clientId("service-account-cl").getServiceAccountUser();
+            userIdCl = user.getId();
         }
     }
 
     @Test
     public void clientCredentialsAuthRequest_ClientES256_RealmPS256() throws Exception {
-    	conductClientCredentialsAuthRequestWithRefreshToken(Algorithm.HS256, Algorithm.ES256, Algorithm.PS256);
+        conductClientCredentialsAuthRequestWithRefreshToken(Constants.INTERNAL_SIGNATURE_ALGORITHM, Algorithm.ES256, Algorithm.PS256);
     }
 
     @Test
     public void failManagePassword() {
-        UserResource serviceAccount = adminClient.realm("test").users().get(userId);
+        UserResource serviceAccount = adminClient.realm("test").users().get(userIdClRefreshOn);
         UserRepresentation representation = serviceAccount.toRepresentation();
 
         CredentialRepresentation password = new CredentialRepresentation();
@@ -342,7 +352,7 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
         representation.setCredentials(Arrays.asList(password));
 
         this.expectedException.expect(Matchers.allOf(Matchers.instanceOf(ClientErrorException.class),
-                Matchers.hasProperty("response", Matchers.hasProperty("status", Matchers.is(400)))));
+                Matchers.hasProperty("response", Matchers.hasProperty("status", is(400)))));
         this.expectedException.reportMissingExceptionWithMessage("Should fail, should not be possible to manage credentials for service accounts");
 
         serviceAccount.update(representation);
@@ -354,28 +364,29 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
     @Test
     public void clientCredentialsAuthSuccessWithoutRefreshToken_revokeToken() throws Exception {
         String tokenString = clientCredentialsAuthSuccessWithoutRefreshTokenImpl();
+        oauth.client("service-account-cl", "secret1");
         AccessToken accessToken = oauth.verifyToken(tokenString);
 
         // Revoke access token
-        CloseableHttpResponse response1 = oauth.doTokenRevoke(tokenString, "access_token", "secret1");
-        assertThat(response1, org.keycloak.testsuite.util.Matchers.statusCodeIsHC(Response.Status.OK));
-        response1.close();
+        assertTrue(oauth.tokenRevocationRequest(tokenString).accessToken().send().isSuccess());
 
         events.expect(EventType.REVOKE_GRANT)
                 .client("service-account-cl")
-                .user(AssertEvents.isUUID())
-                .session(Matchers.isEmptyOrNullString())
+                .user(userIdCl)
+                .session(is(emptyOrNullString()))
                 .detail(Details.TOKEN_ID, accessToken.getId())
                 .assertEvent();
 
         // Check that it is not possible to introspect token anymore
-        Assert.assertFalse(getIntrospectionResponse("service-account-cl", "secret1", tokenString));
-        // TODO: This would be better to be "INTROSPECT_TOKEN_ERROR"
-        events.expect(EventType.INTROSPECT_TOKEN)
+        Assert.assertFalse(getIntrospectionResponse(tokenString));
+
+        events.expect(EventType.INTROSPECT_TOKEN_ERROR)
                 .client("service-account-cl")
-                .user(Matchers.isEmptyOrNullString())
-                .session(Matchers.isEmptyOrNullString())
+                .user(is(emptyOrNullString()))
+                .session(is(emptyOrNullString()))
+                .error(Errors.INVALID_TOKEN)
                 .assertEvent();
+        events.assertEmpty();
     }
 
     @Test
@@ -393,8 +404,8 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
 
     // Returns accessToken string
     private String clientCredentialsAuthSuccessWithoutRefreshTokenImpl() throws Exception {
-        oauth.clientId("service-account-cl");
-        OAuthClient.AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest("secret1");
+        oauth.client("service-account-cl", "secret1");
+        AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest();
 
         assertEquals(200, response.getStatusCode());
         String tokenString = response.getAccessToken();
@@ -404,10 +415,15 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
         Assert.assertNull(accessToken.getSessionState());
         Assert.assertNull("Refresh-Token should not be present", response.getRefreshToken());
 
+        AccessTokenContext ctx = testingClient.testing("test").getTokenContext(accessToken.getId());
+        Assert.assertEquals(ctx.getSessionType(), AccessTokenContext.SessionType.TRANSIENT);
+        Assert.assertEquals(ctx.getTokenType(), AccessTokenContext.TokenType.REGULAR);
+        Assert.assertEquals(ctx.getGrantType(), OAuth2Constants.CLIENT_CREDENTIALS);
+
         events.expectClientLogin()
                 .client("service-account-cl")
-                .user(AssertEvents.isUUID())
-                .session(AssertEvents.isUUID())
+                .user(userIdCl)
+                .session(is(emptyOrNullString()))
                 .detail(Details.TOKEN_ID, accessToken.getId())
                 .detail(Details.USERNAME, ServiceAccountConstants.SERVICE_ACCOUNT_USER_PREFIX + "service-account-cl")
                 .assertEvent();
@@ -417,21 +433,18 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
         assertThat(clientSessionStats, empty());
 
         // Check that token is possible to introspect
-        Assert.assertTrue(getIntrospectionResponse("service-account-cl", "secret1", tokenString));
+        Assert.assertTrue(getIntrospectionResponse(tokenString));
         events.expect(EventType.INTROSPECT_TOKEN)
                 .client("service-account-cl")
                 .user(AssertEvents.isUUID())
-                .user(Matchers.isEmptyOrNullString())
-                .session(Matchers.isEmptyOrNullString())
+                .session(is(emptyOrNullString()))
                 .assertEvent();
 
         return tokenString;
     }
 
-    private boolean getIntrospectionResponse(String clientId, String clientSecret, String tokenString) throws IOException {
-        String introspectionResponse = oauth.introspectAccessTokenWithClientCredential(clientId, clientSecret, tokenString);
-        ObjectMapper objectMapper = new ObjectMapper();
-        JsonNode jsonNode = objectMapper.readTree(introspectionResponse);
+    private boolean getIntrospectionResponse(String tokenString) throws IOException {
+        JsonNode jsonNode = oauth.doIntrospectionAccessTokenRequest(tokenString).asJsonNode();
         return jsonNode.get("active").asBoolean();
     }
 
@@ -450,9 +463,9 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
 
     // Testing of refresh token is for backwards compatibility. By default, there won't be refresh token for the client credentials grant
     private void clientCredentialsAuthSuccessWithRefreshToken(String expectedRefreshAlg, String expectedAccessAlg) throws Exception {
-        oauth.clientId("service-account-cl-refresh-on");
+        oauth.client("service-account-cl-refresh-on", "secret1");
 
-        OAuthClient.AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest("secret1");
+        AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest();
 
         assertEquals(200, response.getStatusCode());
 
@@ -471,7 +484,7 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
 
         events.expectClientLogin()
                 .client("service-account-cl-refresh-on")
-                .user(userId)
+                .user(userIdClRefreshOn)
                 .session(accessToken.getSessionState())
                 .detail(Details.TOKEN_ID, accessToken.getId())
                 .detail(Details.REFRESH_TOKEN_ID, refreshToken.getId())
@@ -484,7 +497,7 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
         Assert.assertTrue(accessToken.getOtherClaims().containsKey(ServiceAccountConstants.CLIENT_ADDRESS));
         Assert.assertTrue(accessToken.getOtherClaims().containsKey(ServiceAccountConstants.CLIENT_HOST));
 
-        OAuthClient.AccessTokenResponse refreshedResponse = oauth.doRefreshTokenRequest(response.getRefreshToken(), "secret1");
+        AccessTokenResponse refreshedResponse = oauth.doRefreshTokenRequest(response.getRefreshToken());
 
         AccessToken refreshedAccessToken = oauth.verifyToken(refreshedResponse.getAccessToken());
         RefreshToken refreshedRefreshToken = oauth.parseRefreshToken(refreshedResponse.getRefreshToken());
@@ -492,34 +505,34 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
         assertEquals(accessToken.getSessionState(), refreshedAccessToken.getSessionState());
         assertEquals(accessToken.getSessionState(), refreshedRefreshToken.getSessionState());
 
-        events.expectRefresh(refreshToken.getId(), refreshToken.getSessionState()).user(userId).client("service-account-cl-refresh-on").assertEvent();
+        events.expectRefresh(refreshToken.getId(), refreshToken.getSessionState()).user(userIdClRefreshOn).client("service-account-cl-refresh-on").assertEvent();
     }
 
     @Test
     public void userInfoForServiceAccountWithoutRefreshTokenImpl() throws Exception {
-        oauth.clientId("service-account-cl");
-        OAuthClient.AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest("secret1");
+        oauth.client("service-account-cl", "secret1");
+        AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest();
         assertEquals(200, response.getStatusCode());
         assertNull(response.getRefreshToken());
 
-        UserInfo info = oauth.doUserInfoRequest(response.getAccessToken());
+        UserInfo info = oauth.doUserInfoRequest(response.getAccessToken()).getUserInfo();
         assertEquals(200, response.getStatusCode());
         assertEquals("service-account-service-account-cl", info.getPreferredUsername());
     }
 
     @Test
     public void userInfoForServiceAccountWithRefreshTokenImpl() throws Exception {
-        oauth.clientId("service-account-cl-refresh-on");
-        OAuthClient.AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest("secret1");
+        oauth.client("service-account-cl-refresh-on", "secret1");
+        AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest();
         assertEquals(200, response.getStatusCode());
         assertNotNull(response.getRefreshToken());
 
-        UserInfo info = oauth.doUserInfoRequest(response.getAccessToken());
+        UserInfo info = oauth.doUserInfoRequest(response.getAccessToken()).getUserInfo();
         assertEquals(200, response.getStatusCode());
         assertEquals("service-account-service-account-cl-refresh-on", info.getPreferredUsername());
 
-        HttpResponse logoutResponse = oauth.doLogout(response.getRefreshToken(), "secret1");
-        assertEquals(204, logoutResponse.getStatusLine().getStatusCode());
+        LogoutResponse logoutResponse = oauth.doLogout(response.getRefreshToken());
+        assertTrue(logoutResponse.isSuccess());
     }
 
     /**
@@ -527,9 +540,9 @@ public class ServiceAccountTest extends AbstractKeycloakTest {
      */
     @Test
     public void clientCredentialsAuthSuccessWithUrlEncodedSpecialCharactersSecret() throws Exception {
-        oauth.clientId("service-account-cl-special-secrets");
+        oauth.client("service-account-cl-special-secrets", "secret/with=special?character");
 
-        OAuthClient.AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest("secret/with=special?character");
+        AccessTokenResponse response = oauth.doClientCredentialsGrantAccessTokenRequest();
 
         assertEquals(200, response.getStatusCode());
     }

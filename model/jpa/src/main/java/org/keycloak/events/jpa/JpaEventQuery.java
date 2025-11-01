@@ -17,18 +17,21 @@
 
 package org.keycloak.events.jpa;
 
+import org.hibernate.jpa.AvailableHints;
 import org.keycloak.events.Event;
 import org.keycloak.events.EventQuery;
 import org.keycloak.events.EventType;
 
-import javax.persistence.EntityManager;
-import javax.persistence.TypedQuery;
-import javax.persistence.criteria.CriteriaBuilder;
-import javax.persistence.criteria.CriteriaQuery;
-import javax.persistence.criteria.Predicate;
-import javax.persistence.criteria.Root;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.TypedQuery;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Date;
+import java.util.GregorianCalendar;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Stream;
@@ -88,17 +91,34 @@ public class JpaEventQuery implements EventQuery {
     }
 
     @Override
+    @Deprecated
     public EventQuery fromDate(Date fromDate) {
-        predicates.add(cb.greaterThanOrEqualTo(root.<Long>get("time"), fromDate.getTime()));
+        return fromDate(fromDate.getTime());
+    }
+
+    @Override
+    public EventQuery fromDate(long fromDate) {
+        predicates.add(cb.greaterThanOrEqualTo(root.get("time"), fromDate));
         return this;
     }
 
     @Override
     public EventQuery toDate(Date toDate) {
-        predicates.add(cb.lessThanOrEqualTo(root.<Long>get("time"), toDate.getTime()));
+        Calendar calendar = new GregorianCalendar();
+        calendar.setTime(toDate);
+        calendar.set(Calendar.HOUR_OF_DAY, 23);
+        calendar.set(Calendar.MINUTE, 59);
+        calendar.set(Calendar.SECOND, 59);
+        calendar.set(Calendar.MILLISECOND, 999);
+        return toDate(calendar.getTimeInMillis());
+    }
+
+    @Override
+    public EventQuery toDate(long toDate) {
+        predicates.add(cb.lessThanOrEqualTo(root.get("time"), toDate));
         return this;
     }
-    
+
     @Override
     public EventQuery ipAddress(String ipAddress) {
         predicates.add(cb.equal(root.get("ipAddress"), ipAddress));
@@ -142,6 +162,7 @@ public class JpaEventQuery implements EventQuery {
         }
 
         TypedQuery<EventEntity> query = em.createQuery(cq);
+        query.setHint(AvailableHints.HINT_READ_ONLY, true);
 
         return closing(paginateQuery(query, firstResult, maxResults).getResultStream().map(JpaEventStoreProvider::convertEvent));
     }

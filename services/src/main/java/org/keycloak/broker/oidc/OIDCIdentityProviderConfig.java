@@ -18,12 +18,9 @@ package org.keycloak.broker.oidc;
 
 import static org.keycloak.common.util.UriUtils.checkUrl;
 
-import org.keycloak.OAuth2Constants;
 import org.keycloak.common.enums.SslRequired;
 import org.keycloak.models.IdentityProviderModel;
 import org.keycloak.models.RealmModel;
-
-import java.util.Arrays;
 
 /**
  * @author Pedro Igor
@@ -34,6 +31,9 @@ public class OIDCIdentityProviderConfig extends OAuth2IdentityProviderConfig {
 
     public static final String USE_JWKS_URL = "useJwksUrl";
     public static final String VALIDATE_SIGNATURE = "validateSignature";
+    public static final String IS_ACCESS_TOKEN_JWT = "isAccessTokenJWT";
+    public static final String SUPPORTS_CLIENT_ASSERTIONS = "supportsClientAssertions";
+    public static final String SUPPORTS_CLIENT_ASSERTION_REUSE = "supportsClientAssertionReuse";
 
     public OIDCIdentityProviderConfig(IdentityProviderModel identityProviderModel) {
         super(identityProviderModel);
@@ -51,16 +51,32 @@ public class OIDCIdentityProviderConfig extends OAuth2IdentityProviderConfig {
     }
 
     public String getIssuer() {
-        return getConfig().get("issuer");
+        return getConfig().get(ISSUER);
     }
     public void setIssuer(String issuer) {
-        getConfig().put("issuer", issuer);
+        getConfig().put(ISSUER, issuer);
     }
     public String getLogoutUrl() {
         return getConfig().get("logoutUrl");
     }
     public void setLogoutUrl(String url) {
         getConfig().put("logoutUrl", url);
+    }
+
+    public boolean isSendClientIdOnLogout() {
+        return Boolean.parseBoolean(getConfig().getOrDefault("sendClientIdOnLogout", Boolean.FALSE.toString()));
+    }
+
+    public void setSendClientOnLogout(boolean value) {
+        getConfig().put("sendClientIdOnLogout", Boolean.valueOf(value).toString());
+    }
+
+    public boolean isSendIdTokenOnLogout() {
+        return Boolean.parseBoolean(getConfig().getOrDefault("sendIdTokenOnLogout", Boolean.TRUE.toString()));
+    }
+
+    public void setSendIdTokenOnLogout(boolean value) {
+        getConfig().put("sendIdTokenOnLogout", Boolean.valueOf(value).toString());
     }
 
     public String getPublicKeySignatureVerifier() {
@@ -85,6 +101,14 @@ public class OIDCIdentityProviderConfig extends OAuth2IdentityProviderConfig {
 
     public void setValidateSignature(boolean validateSignature) {
         getConfig().put(VALIDATE_SIGNATURE, String.valueOf(validateSignature));
+    }
+
+    public void setAccessTokenJwt(boolean accessTokenJwt) {
+        getConfig().put(IS_ACCESS_TOKEN_JWT, String.valueOf(accessTokenJwt));
+    }
+
+    public boolean isAccessTokenJwt() {
+        return Boolean.parseBoolean(getConfig().get(IS_ACCESS_TOKEN_JWT));
     }
 
     public boolean isUseJwksUrl() {
@@ -120,6 +144,18 @@ public class OIDCIdentityProviderConfig extends OAuth2IdentityProviderConfig {
         getConfig().put("disableUserInfo", String.valueOf(disable));
     }
 
+    public boolean isDisableNonce() {
+        return Boolean.parseBoolean(getConfig().get("disableNonce"));
+    }
+
+    public void setDisableNonce(boolean disableNonce) {
+        if (disableNonce) {
+            getConfig().put("disableNonce", Boolean.TRUE.toString());
+        } else {
+            getConfig().remove("disableNonce");
+        }
+    }
+
     public int getAllowedClockSkew() {
         String allowedClockSkew = getConfig().get(ALLOWED_CLOCK_SKEW);
         if (allowedClockSkew == null || allowedClockSkew.isEmpty()) {
@@ -131,6 +167,26 @@ public class OIDCIdentityProviderConfig extends OAuth2IdentityProviderConfig {
             // ignore it and use default
             return 0;
         }
+    }
+
+    public boolean isDisableTypeClaimCheck() {
+        return Boolean.parseBoolean(getConfig().get("disableTypeClaimCheck"));
+    }
+
+    public void setDisableTypeClaimCheck(boolean disableTypeClaimCheck) {
+        if (disableTypeClaimCheck) {
+            getConfig().put("disableTypeClaimCheck", Boolean.TRUE.toString());
+        } else {
+            getConfig().remove("disableTypeClaimCheck");
+        }
+    }
+
+    public boolean isSupportsClientAssertions() {
+        return Boolean.parseBoolean(getConfig().get(SUPPORTS_CLIENT_ASSERTIONS));
+    }
+
+    public boolean isSupportsClientAssertionReuse() {
+        return Boolean.parseBoolean(getConfig().get(SUPPORTS_CLIENT_ASSERTION_REUSE));
     }
 
     @Override

@@ -31,8 +31,11 @@ import java.util.Map;
 public class ServerInfoRepresentation {
 
     private SystemInfoRepresentation systemInfo;
+    private CpuInfoRepresentation cpuInfo;
     private MemoryInfoRepresentation memoryInfo;
     private ProfileInfoRepresentation profileInfo;
+
+    private List<FeatureRepresentation> features;
 
     private CryptoInfoRepresentation cryptoInfo;
 
@@ -69,12 +72,28 @@ public class ServerInfoRepresentation {
         this.memoryInfo = memoryInfo;
     }
 
+    public CpuInfoRepresentation getCpuInfo() {
+        return cpuInfo;
+    }
+
+    public void setCpuInfo(CpuInfoRepresentation cpuInfo) {
+        this.cpuInfo = cpuInfo;
+    }
+
     public ProfileInfoRepresentation getProfileInfo() {
         return profileInfo;
     }
 
     public void setProfileInfo(ProfileInfoRepresentation profileInfo) {
         this.profileInfo = profileInfo;
+    }
+
+    public List<FeatureRepresentation> getFeatures() {
+        return features;
+    }
+
+    public void setFeatures(List<FeatureRepresentation> features) {
+        this.features = features;
     }
 
     public CryptoInfoRepresentation getCryptoInfo() {

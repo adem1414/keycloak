@@ -25,7 +25,6 @@ import org.junit.Test;
 import org.junit.rules.ExpectedException;
 import org.keycloak.common.crypto.CryptoIntegration;
 import org.keycloak.common.crypto.CryptoProvider;
-import org.keycloak.common.util.Base64;
 import org.keycloak.common.util.DerUtils;
 import org.keycloak.common.util.StreamUtil;
 import org.keycloak.dom.saml.v2.SAML2Object;
@@ -85,6 +84,7 @@ import java.math.BigInteger;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.PrivateKey;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 
@@ -105,7 +105,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertThat;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertTrue;
 /**
  * Test class for SAML parser.
@@ -217,8 +217,8 @@ public class SAMLParserTest {
         assertNull(rtChoiceType.getAssertion());
         assertNotNull(rtChoiceType.getEncryptedAssertion());
 
-        PrivateKey privateKey = DerUtils.decodePrivateKey(Base64.decode(PRIVATE_KEY));
-        AssertionUtil.decryptAssertion(holder, resp, privateKey);
+        PrivateKey privateKey = DerUtils.decodePrivateKey(Base64.getDecoder().decode(PRIVATE_KEY));
+        AssertionUtil.decryptAssertion(resp, privateKey);
 
         rtChoiceType = resp.getAssertions().get(0);
         assertNotNull(rtChoiceType.getAssertion());

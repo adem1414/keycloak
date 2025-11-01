@@ -73,6 +73,9 @@ public class OIDCConfigurationRepresentation {
     @JsonProperty("subject_types_supported")
     private List<String> subjectTypesSupported;
 
+    @JsonProperty("prompt_values_supported")
+    private List<String> promptValuesSupported;
+
     @JsonProperty("id_token_signing_alg_values_supported")
     private List<String> idTokenSigningAlgValuesSupported;
 
@@ -157,6 +160,9 @@ public class OIDCConfigurationRepresentation {
     @JsonProperty("tls_client_certificate_bound_access_tokens")
     private Boolean tlsClientCertificateBoundAccessTokens;
 
+    @JsonProperty("dpop_signing_alg_values_supported")
+    private List<String> dpopSigningAlgValuesSupported;
+
     @JsonProperty("revocation_endpoint")
     private String revocationEndpoint;
 
@@ -192,6 +198,12 @@ public class OIDCConfigurationRepresentation {
 
     @JsonProperty("mtls_endpoint_aliases")
     private MTLSEndpointAliases mtlsEndpointAliases;
+
+    @JsonProperty("authorization_response_iss_parameter_supported")
+    private Boolean authorizationResponseIssParameterSupported;
+
+    @JsonProperty("authorization_details_types_supported")
+    private List<String> authorizationDetailsTypesSupported;
 
     protected Map<String, Object> otherClaims = new HashMap<String, Object>();
 
@@ -487,6 +499,14 @@ public class OIDCConfigurationRepresentation {
         this.tlsClientCertificateBoundAccessTokens = tlsClientCertificateBoundAccessTokens;
     }
 
+    public List<String> getDpopSigningAlgValuesSupported() {
+        return dpopSigningAlgValuesSupported;
+    }
+
+    public void setDpopSigningAlgValuesSupported(List<String> dpopSigningAlgValuesSupported) {
+        this.dpopSigningAlgValuesSupported = dpopSigningAlgValuesSupported;
+    }
+
     public String getRevocationEndpoint() {
         return revocationEndpoint;
     }
@@ -621,7 +641,39 @@ public class OIDCConfigurationRepresentation {
         return frontChannelLogoutSessionSupported;
     }
 
+    public void setFrontChannelLogoutSessionSupported(Boolean frontChannelLogoutSessionSupported) {
+        this.frontChannelLogoutSessionSupported = frontChannelLogoutSessionSupported;
+    }
+
     public Boolean getFrontChannelLogoutSupported() {
         return frontChannelLogoutSupported;
+    }
+
+    public void setFrontChannelLogoutSupported(Boolean frontChannelLogoutSupported) {
+        this.frontChannelLogoutSupported = frontChannelLogoutSupported;
+    }
+
+    public Boolean getAuthorizationResponseIssParameterSupported() {
+        return authorizationResponseIssParameterSupported;
+    }
+
+    public void setAuthorizationResponseIssParameterSupported(Boolean authorizationResponseIssParameterSupported) {
+        this.authorizationResponseIssParameterSupported = authorizationResponseIssParameterSupported;
+    }
+
+    public List<String> getPromptValuesSupported() {
+        return promptValuesSupported;
+    }
+
+    public void setPromptValuesSupported(List<String> promptValuesSupported) {
+        this.promptValuesSupported = promptValuesSupported;
+    }
+
+    public List<String> getAuthorizationDetailsTypesSupported() {
+        return authorizationDetailsTypesSupported;
+    }
+
+    public void setAuthorizationDetailsTypesSupported(List<String> authorizationDetailsTypesSupported) {
+        this.authorizationDetailsTypesSupported = authorizationDetailsTypesSupported;
     }
 }

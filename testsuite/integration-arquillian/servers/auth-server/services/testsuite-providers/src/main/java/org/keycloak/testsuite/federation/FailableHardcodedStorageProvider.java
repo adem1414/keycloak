@@ -193,10 +193,10 @@ public class FailableHardcodedStorageProvider implements UserStorageProvider, Us
         local.setLastName(last);
         local.setEmail(email);
         local.setFederationLink(model.getId());
-        for (String key : attributes.keySet()) {
-            List<String> values = attributes.get(key);
+        for (var entry : attributes.entrySet()) {
+            List<String> values = entry.getValue();
             if (values == null) continue;
-            local.setAttribute(key, values);
+            local.setAttribute(entry.getKey(), values);
         }
         return new Delegate(local);
     }
@@ -219,20 +219,6 @@ public class FailableHardcodedStorageProvider implements UserStorageProvider, Us
     public int getUsersCount(RealmModel realm) {
         checkForceFail();
         return 1;
-    }
-
-    @Override
-    public Stream<UserModel> getUsersStream(RealmModel realm) {
-        checkForceFail();
-        UserModel model = getUserByUsername(realm, username);
-        return model != null ? Stream.of(model) : Stream.empty();
-    }
-
-    @Override
-    public Stream<UserModel> getUsersStream(RealmModel realm, Integer firstResult, Integer maxResults) {
-        checkForceFail();
-        UserModel model = getUserByUsername(realm, username);
-        return model != null ? Stream.of(model) : Stream.empty();
     }
 
     @Override

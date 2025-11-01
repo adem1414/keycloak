@@ -18,11 +18,8 @@
 package org.keycloak.models;
 
 import org.keycloak.provider.ProviderEvent;
-import org.keycloak.storage.SearchableModelField;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -30,17 +27,6 @@ import java.util.stream.Stream;
  * @version $Revision: 1 $
  */
 public interface RoleModel {
-
-    public static class SearchableFields {
-        public static final SearchableModelField<RoleModel> ID                  = new SearchableModelField<>("id", String.class);
-        public static final SearchableModelField<RoleModel> REALM_ID            = new SearchableModelField<>("realmId", String.class);
-        /** If client role, ID of the client (not the clientId) */
-        public static final SearchableModelField<RoleModel> CLIENT_ID           = new SearchableModelField<>("clientId", String.class);
-        public static final SearchableModelField<RoleModel> NAME                = new SearchableModelField<>("name", String.class);
-        public static final SearchableModelField<RoleModel> DESCRIPTION         = new SearchableModelField<>("description", String.class);
-        public static final SearchableModelField<RoleModel> IS_CLIENT_ROLE      = new SearchableModelField<>("isClientRole", Boolean.class);
-        public static final SearchableModelField<RoleModel> COMPOSITE_ROLE      = new SearchableModelField<>("compositeRoles", Boolean.class);
-    }
 
     interface RoleNameChangeEvent extends ProviderEvent {
         RealmModel getRealm();
@@ -52,6 +38,68 @@ public interface RoleModel {
          */
         String getClientId();
         KeycloakSession getKeycloakSession();
+    }
+
+    interface RoleEvent extends ProviderEvent {
+        RealmModel getRealm();
+        RoleModel getRole();
+        KeycloakSession getKeycloakSession();
+    }
+
+    interface RoleGrantedEvent extends RoleModel.RoleEvent {
+        static void fire(RoleModel role, UserModel user, KeycloakSession session) {
+            session.getKeycloakSessionFactory().publish(new RoleModel.RoleGrantedEvent() {
+                @Override
+                public RealmModel getRealm() {
+                    return session.getContext().getRealm();
+                }
+
+                @Override
+                public RoleModel getRole() {
+                    return role;
+                }
+
+                @Override
+                public UserModel getUser() {
+                    return user;
+                }
+
+                @Override
+                public KeycloakSession getKeycloakSession() {
+                    return session;
+                }
+            });
+        }
+
+        UserModel getUser();
+    }
+
+    interface RoleRevokedEvent extends RoleModel.RoleEvent {
+        static void fire(RoleModel role, UserModel user, KeycloakSession session) {
+            session.getKeycloakSessionFactory().publish(new RoleModel.RoleRevokedEvent() {
+                @Override
+                public RealmModel getRealm() {
+                    return session.getContext().getRealm();
+                }
+
+                @Override
+                public RoleModel getRole() {
+                    return role;
+                }
+
+                @Override
+                public UserModel getUser() {
+                    return user;
+                }
+
+                @Override
+                public KeycloakSession getKeycloakSession() {
+                    return session;
+                }
+            });
+        }
+
+        UserModel getUser();
     }
 
     String getName();

@@ -15,7 +15,6 @@ import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.CollectionCertStoreParameters;
 import java.security.spec.ECParameterSpec;
-import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import javax.crypto.Cipher;
@@ -36,6 +35,13 @@ public interface CryptoProvider {
      * @return BouncyCastle security provider. Can be either non-FIPS or FIPS based provider
      */
     Provider getBouncyCastleProvider();
+
+    /**
+     * Order of this provider. This allows to specify which CryptoProvider will have preference in case that more of them are on the classpath.
+     *
+     * The higher number has preference over the lower number
+     */
+    int order();
 
     /**
      * Get some algorithm provider implementation. Returned implementation can be dependent according to if we have
@@ -85,7 +91,7 @@ public interface CryptoProvider {
     KeyFactory getKeyFactory(String algorithm) throws NoSuchAlgorithmException, NoSuchProviderException;
 
     Cipher getAesCbcCipher() throws NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException;
-    
+
     Cipher getAesGcmCipher() throws NoSuchAlgorithmException, NoSuchProviderException, NoSuchPaddingException;
 
     SecretKeyFactory getSecretKeyFact(String keyAlgorithm) throws NoSuchAlgorithmException, NoSuchProviderException;
@@ -124,4 +130,11 @@ public interface CryptoProvider {
      * @return decorated factory
      */
     SSLSocketFactory wrapFactoryForTruststore(SSLSocketFactory delegate);
+
+    /**
+     * @return Allowed key sizes of RSA key modulus, which this cryptoProvider supports
+     */
+    default String[] getSupportedRsaKeySizes() {
+        return new String[] {"1024", "2048", "3072", "4096"};
+    }
 }

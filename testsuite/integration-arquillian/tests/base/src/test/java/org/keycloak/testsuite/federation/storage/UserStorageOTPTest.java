@@ -25,13 +25,12 @@ import java.util.List;
 
 
 import org.jboss.arquillian.graphene.page.Page;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
-import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.common.util.MultivaluedHashMap;
+import org.keycloak.events.Details;
 import org.keycloak.events.EventType;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.credential.OTPCredentialModel;
@@ -91,8 +90,6 @@ public class UserStorageOTPTest extends AbstractTestRealmKeycloakTest {
 
     @Before
     public void addProvidersBeforeTest() throws URISyntaxException, IOException {
-        Assume.assumeTrue("RealmProvider is not 'jpa'", isJpaRealmProvider());
-
         ComponentRepresentation dummyProvider = new ComponentRepresentation();
         dummyProvider.setName("dummy");
         dummyProvider.setId(componentId);
@@ -142,7 +139,7 @@ public class UserStorageOTPTest extends AbstractTestRealmKeycloakTest {
 
         appPage.assertCurrent();
         Assert.assertEquals(AppPage.RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
     }
 
 
@@ -177,7 +174,12 @@ public class UserStorageOTPTest extends AbstractTestRealmKeycloakTest {
             appPage.assertCurrent();
 
             // Logout
-            events.expect(EventType.UPDATE_TOTP).user(userRep.getId()).assertEvent(); //remove the UPDATE_TOTP event
+            events.expect(EventType.UPDATE_TOTP)
+                    .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE)
+                    .user(userRep.getId()).assertEvent();
+            events.expect(EventType.UPDATE_CREDENTIAL)
+                    .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE)
+                    .user(userRep.getId()).assertEvent();
             EventRepresentation loginEvent = events.expectLogin().user(userRep.getId()).assertEvent();
             String idTokenHint = sendTokenRequestAndGetResponse(loginEvent).getIdToken();
             appPage.logout(idTokenHint);
@@ -236,7 +238,7 @@ public class UserStorageOTPTest extends AbstractTestRealmKeycloakTest {
 
         appPage.assertCurrent();
         Assert.assertEquals(AppPage.RequestType.AUTH_RESPONSE, appPage.getRequestType());
-        Assert.assertNotNull(oauth.getCurrentQuery().get(OAuth2Constants.CODE));
+        Assert.assertNotNull(oauth.parseLoginResponse().getCode());
     }
 
 

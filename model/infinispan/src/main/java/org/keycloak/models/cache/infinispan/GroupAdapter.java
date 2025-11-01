@@ -23,6 +23,7 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RoleModel;
 import org.keycloak.models.cache.infinispan.entities.CachedGroup;
+import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.models.utils.RoleUtils;
 
 import java.util.HashSet;
@@ -50,7 +51,7 @@ public class GroupAdapter implements GroupModel {
         this.cacheSession = cacheSession;
         this.keycloakSession = keycloakSession;
         this.realm = realm;
-        modelSupplier = this::getGroupModel;
+        modelSupplier = new LazyModel<>(this::getGroupModel);
     }
 
     protected void getDelegateForUpdate() {
@@ -112,6 +113,18 @@ public class GroupAdapter implements GroupModel {
     }
 
     @Override
+    public String getDescription() {
+        if (isUpdated()) return updated.getDescription();
+        return cached.getDescription();
+    }
+
+    @Override
+    public void setDescription(String description) {
+        getDelegateForUpdate();
+        updated.setDescription(description);
+    }
+
+    @Override
     public void setSingleAttribute(String name, String value) {
         getDelegateForUpdate();
         updated.setSingleAttribute(name, value);
@@ -133,19 +146,21 @@ public class GroupAdapter implements GroupModel {
     @Override
     public String getFirstAttribute(String name) {
         if (isUpdated()) return updated.getFirstAttribute(name);
-        return cached.getAttributes(modelSupplier).getFirst(name);
+        return cached.getAttributes(keycloakSession, modelSupplier).getFirst(name);
     }
 
     @Override
     public Stream<String> getAttributeStream(String name) {
-        List<String> values = cached.getAttributes(modelSupplier).get(name);
+        if (isUpdated()) return updated.getAttributeStream(name);
+        List<String> values = cached.getAttributes(keycloakSession, modelSupplier).get(name);
         if (values == null) return Stream.empty();
         return values.stream();
     }
 
     @Override
     public Map<String, List<String>> getAttributes() {
-        return cached.getAttributes(modelSupplier);
+        if (isUpdated()) return updated.getAttributes();
+        return cached.getAttributes(keycloakSession, modelSupplier);
     }
 
     @Override
@@ -164,13 +179,13 @@ public class GroupAdapter implements GroupModel {
     public boolean hasDirectRole(RoleModel role) {
         if (isUpdated()) return updated.hasDirectRole(role);
 
-        return cached.getRoleMappings(modelSupplier).contains(role.getId());
+        return cached.getRoleMappings(keycloakSession, modelSupplier).contains(role.getId());
     }
 
     @Override
     public boolean hasRole(RoleModel role) {
         if (isUpdated()) return updated.hasRole(role);
-        if (cached.getRoleMappings(modelSupplier).contains(role.getId())) return true;
+        if (cached.getRoleMappings(keycloakSession, modelSupplier).contains(role.getId())) return true;
         if (getRoleMappingsStream().anyMatch(r -> r.hasRole(role))) return true;
         GroupModel parent = getParent();
         return parent != null && parent.hasRole(role);
@@ -186,7 +201,7 @@ public class GroupAdapter implements GroupModel {
     public Stream<RoleModel> getRoleMappingsStream() {
         if (isUpdated()) return updated.getRoleMappingsStream();
         Set<RoleModel> roles = new HashSet<>();
-        for (String id : cached.getRoleMappings(modelSupplier)) {
+        for (String id : cached.getRoleMappings(keycloakSession, modelSupplier)) {
             RoleModel roleById = keycloakSession.roles().getRoleById(realm, id);
             if (roleById == null) {
                 // chance that role was removed, so just delegate to persistence and get user invalidated
@@ -222,7 +237,7 @@ public class GroupAdapter implements GroupModel {
     public Stream<GroupModel> getSubGroupsStream() {
         if (isUpdated()) return updated.getSubGroupsStream();
         Set<GroupModel> subGroups = new HashSet<>();
-        for (String id : cached.getSubGroups(modelSupplier)) {
+        for (String id : cached.getSubGroups(keycloakSession, modelSupplier)) {
             GroupModel subGroup = keycloakSession.groups().getGroupById(realm, id);
             if (subGroup == null) {
                 // chance that role was removed, so just delegate to persistence and get user invalidated
@@ -232,10 +247,33 @@ public class GroupAdapter implements GroupModel {
             }
             subGroups.add(subGroup);
         }
-        return subGroups.stream();
+        return subGroups.stream().sorted(GroupModel.COMPARE_BY_NAME);
     }
 
+    @Override
+    public Stream<GroupModel> getSubGroupsStream(String search, Integer firstResult, Integer maxResults) {
+        if (isUpdated()) return updated.getSubGroupsStream(search, firstResult, maxResults);
+        return modelSupplier.get().getSubGroupsStream(search, firstResult, maxResults);
+    }
 
+    @Override
+    public Stream<GroupModel> getSubGroupsStream(Integer firstResult, Integer maxResults) {
+        if (isUpdated()) return updated.getSubGroupsStream(firstResult, maxResults);
+        return modelSupplier.get().getSubGroupsStream(firstResult, maxResults);
+    }
+
+    @Override
+    public Stream<GroupModel> getSubGroupsStream(String search, Boolean exact, Integer firstResult, Integer maxResults) {
+        if (isUpdated()) return updated.getSubGroupsStream(search, exact, firstResult, maxResults);
+        return modelSupplier.get().getSubGroupsStream(search, exact, firstResult, maxResults);
+    }
+
+    @Override
+    public Long getSubGroupsCount() {
+        if (isUpdated()) return updated.getSubGroupsCount();
+        GroupModel model = modelSupplier.get();
+        return model == null ? null : model.getSubGroupsCount();
+    }
 
     @Override
     public void setParent(GroupModel group) {
@@ -259,5 +297,16 @@ public class GroupAdapter implements GroupModel {
 
     private GroupModel getGroupModel() {
         return cacheSession.getGroupDelegate().getGroupById(realm, cached.getId());
+    }
+
+    @Override
+    public boolean escapeSlashesInGroupPath() {
+        return KeycloakModelUtils.escapeSlashesInGroupPath(keycloakSession);
+    }
+
+    @Override
+    public Type getType() {
+        if (isUpdated()) return updated.getType();
+        return cached.getType();
     }
 }

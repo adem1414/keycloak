@@ -18,6 +18,8 @@
 package org.keycloak.protocol.saml;
 
 import org.keycloak.Config;
+import org.keycloak.common.Profile;
+import org.keycloak.common.Profile.Feature;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.ClientScopeModel;
@@ -27,7 +29,9 @@ import org.keycloak.models.RealmModel;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.protocol.AbstractLoginProtocolFactory;
 import org.keycloak.protocol.LoginProtocol;
+import org.keycloak.protocol.oidc.OIDCLoginProtocolFactory;
 import org.keycloak.protocol.saml.mappers.AttributeStatementHelper;
+import org.keycloak.organization.protocol.mappers.saml.OrganizationMembershipMapper;
 import org.keycloak.protocol.saml.mappers.RoleListMapper;
 import org.keycloak.protocol.saml.mappers.UserPropertyAttributeStatementMapper;
 import org.keycloak.representations.idm.CertificateRepresentation;
@@ -35,8 +39,8 @@ import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.saml.SignatureAlgorithm;
 import org.keycloak.saml.common.constants.JBossSAMLURIConstants;
 import org.keycloak.saml.processing.core.saml.v2.constants.X500SAMLProfileConstants;
-
 import org.keycloak.saml.validators.DestinationValidator;
+
 import javax.xml.crypto.dsig.CanonicalizationMethod;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -55,8 +59,8 @@ public class SamlProtocolFactory extends AbstractLoginProtocolFactory {
     private DestinationValidator destinationValidator;
 
     @Override
-    public Object createProtocolEndpoint(RealmModel realm, EventBuilder event) {
-        return new SamlService(realm, event, destinationValidator);
+    public Object createProtocolEndpoint(KeycloakSession session, EventBuilder event) {
+        return new SamlService(session, event, destinationValidator);
     }
 
     @Override
@@ -93,6 +97,11 @@ public class SamlProtocolFactory extends AbstractLoginProtocolFactory {
         model = RoleListMapper.create("role list", "Role", AttributeStatementHelper.BASIC, null, false);
         builtins.put("role list", model);
         defaultBuiltins.add(model);
+        if (Profile.isFeatureEnabled(Feature.ORGANIZATION)) {
+            model = OrganizationMembershipMapper.create();
+            builtins.put("organization", model);
+            defaultBuiltins.add(model);
+        }
         this.destinationValidator = DestinationValidator.forProtocolMap(config.getArray("knownProtocols"));
     }
 
@@ -118,6 +127,14 @@ public class SamlProtocolFactory extends AbstractLoginProtocolFactory {
         roleListScope.setProtocol(getId());
         roleListScope.addProtocolMapper(builtins.get("role list"));
         newRealm.addDefaultClientScope(roleListScope, true);
+        if (Profile.isFeatureEnabled(Feature.ORGANIZATION)) {
+            ClientScopeModel organizationScope = newRealm.addClientScope("saml_organization");
+            organizationScope.setDescription("Organization Membership");
+            organizationScope.setDisplayOnConsentScreen(false);
+            organizationScope.setProtocol(getId());
+            organizationScope.addProtocolMapper(builtins.get("organization"));
+            newRealm.addDefaultClientScope(organizationScope, true);
+        }
     }
 
     @Override
@@ -163,7 +180,8 @@ public class SamlProtocolFactory extends AbstractLoginProtocolFactory {
             client.setRequiresClientSignature(true);
         }
 
-        if (client.requiresClientSignature() && client.getClientSigningCertificate() == null) {
+        if (client.requiresClientSignature() && client.getClientSigningCertificate() == null
+                && (!client.isUseMetadataDescriptorUrl() || client.getMetadataDescriptorUrl() != null)) {
             CertificateRepresentation info = KeycloakModelUtils.generateKeyPairCertificate(newClient.getClientId());
             client.setClientSigningCertificate(info.getCertificate());
             client.setClientSigningPrivateKey(info.getPrivateKey());
@@ -177,4 +195,11 @@ public class SamlProtocolFactory extends AbstractLoginProtocolFactory {
         client.setArtifactBindingIdentifierFrom(clientRep.getClientId());
     }
 
+    /**
+     * defines the option-order in the admin-ui
+     */
+    @Override
+    public int order() {
+        return OIDCLoginProtocolFactory.UI_ORDER - 10;
+    }
 }

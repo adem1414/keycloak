@@ -26,6 +26,9 @@ import java.util.stream.Stream;
 
 /**
  * Validates and manages the credentials of a known entity (for example, a user).
+ *
+ * NOTE: This class might be renamed to {@link org.keycloak.models.UserCredentialManager} in Keycloak 27. Please use the {@link org.keycloak.models.UserCredentialManager}
+ * already if you can
  */
 public interface SubjectCredentialManager {
 
@@ -79,6 +82,24 @@ public interface SubjectCredentialManager {
      * Read stored credentials as a stream.
      */
     Stream<CredentialModel> getStoredCredentialsStream();
+
+    /**
+     * Returns a stream consisting of the federated credentials.
+     *
+     * @return a stream consisting of the federated credentials
+     */
+    default Stream<CredentialModel> getFederatedCredentialsStream() {
+        return Stream.empty();
+    }
+
+    /**
+     * Returns a stream consisting of both local and federated credentials.
+     *
+     * @return a stream of both local and federated credentials
+     */
+    default Stream<CredentialModel> getCredentials() {
+        return Stream.concat(getStoredCredentialsStream(), getFederatedCredentialsStream());
+    }
 
     /**
      * Read stored credentials by type as a stream.

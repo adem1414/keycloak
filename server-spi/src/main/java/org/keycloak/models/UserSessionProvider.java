@@ -17,13 +17,13 @@
 
 package org.keycloak.models;
 
-import org.keycloak.provider.Provider;
-
 import java.util.Collection;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
+
+import org.keycloak.provider.Provider;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -34,21 +34,64 @@ public interface UserSessionProvider extends Provider {
     /**
      * Returns currently used Keycloak session.
      * @return {@link KeycloakSession}
+     * @deprecated for removal.
      */
+    // It is not used anywhere. Remove it?
+    @Deprecated(since = "26.4", forRemoval = true)
     KeycloakSession getKeycloakSession();
 
     AuthenticatedClientSessionModel createClientSession(RealmModel realm, ClientModel client, UserSessionModel userSession);
-    
+
     /**
-     * @deprecated Use {@link #getClientSession(UserSessionModel, ClientModel, String, boolean)} instead.
+     * @deprecated Use {@link #getClientSession(UserSessionModel, ClientModel, boolean)} instead.
      */
+    @Deprecated(since = "26.4", forRemoval = true)
     default AuthenticatedClientSessionModel getClientSession(UserSessionModel userSession, ClientModel client, UUID clientSessionId, boolean offline) {
-        return getClientSession(userSession, client, clientSessionId == null ? null : clientSessionId.toString(), offline);
+        return getClientSession(userSession, client, offline);
     }
-    AuthenticatedClientSessionModel getClientSession(UserSessionModel userSession, ClientModel client, String clientSessionId, boolean offline);
 
-    UserSessionModel createUserSession(RealmModel realm, UserModel user, String loginUsername, String ipAddress, String authMethod, boolean rememberMe, String brokerSessionId, String brokerUserId);
+    /**
+     * @deprecated Use {@link #getClientSession(UserSessionModel, ClientModel, boolean)} instead.
+     */
+    @Deprecated(since = "26.4", forRemoval = true)
+    default AuthenticatedClientSessionModel getClientSession(UserSessionModel userSession, ClientModel client, String clientSessionId, boolean offline) {
+        return getClientSession(userSession, client, offline);
+    }
 
+    /**
+     * Gets the authenticated client session for a given user session and client.
+     *
+     * @param userSession The user's session model.
+     * @param client      The client model.
+     * @param offline     If {@code true}, retrieves the offline session; otherwise, retrieves the online session.
+     * @return The authenticated client session, or {@code null} if it doesn't exist.
+     */
+    AuthenticatedClientSessionModel getClientSession(UserSessionModel userSession, ClientModel client, boolean offline);
+
+    /**
+     * @deprecated Use {@link #createUserSession(String, RealmModel, UserModel, String, String, String, boolean, String, String, UserSessionModel.SessionPersistenceState)} instead.
+     */
+    @Deprecated(forRemoval = true)
+    default UserSessionModel createUserSession(RealmModel realm, UserModel user, String loginUsername, String ipAddress, String authMethod, boolean rememberMe, String brokerSessionId, String brokerUserId) {
+        return createUserSession(null, realm, user, loginUsername, ipAddress, authMethod, rememberMe, brokerSessionId,
+                brokerUserId, UserSessionModel.SessionPersistenceState.PERSISTENT);
+    }
+
+    /**
+     * Creates a new user session with the given parameters.
+     *
+     * @param id identifier. Is generated if {@code null}
+     * @param realm the realm
+     * @param user user associated with the created user session
+     * @param loginUsername
+     * @param ipAddress
+     * @param authMethod
+     * @param rememberMe
+     * @param brokerSessionId
+     * @param brokerUserId
+     * @param persistenceState
+     * @return Model of the created user session
+     */
     UserSessionModel createUserSession(String id, RealmModel realm, UserModel user, String loginUsername, String ipAddress,
                                        String authMethod, boolean rememberMe, String brokerSessionId, String brokerUserId, UserSessionModel.SessionPersistenceState persistenceState);
 
@@ -76,7 +119,7 @@ public interface UserSessionProvider extends Provider {
      * Obtains the online user sessions associated with the specified client, starting from the {@code firstResult} and containing
      * at most {@code maxResults}.
      *
-     * @param realm a reference tot he realm.
+     * @param realm a reference to the realm.
      * @param client the client whose user sessions are being searched.
      * @param firstResult first result to return. Ignored if negative or {@code null}.
      * @param maxResults maximum number of results to return. Ignored if negative or {@code null}.
@@ -96,8 +139,8 @@ public interface UserSessionProvider extends Provider {
     UserSessionModel getUserSessionByBrokerSessionId(RealmModel realm, String brokerSessionId);
 
     /**
-     * Return userSession of specified ID as long as the predicate passes. Otherwise returns {@code null}.
-     * If predicate doesn't pass, implementation can do some best-effort actions to try have predicate passing (eg. download userSession from other DC)
+     * Return userSession of specified ID as long as the predicate passes. Otherwise, returns {@code null}.
+     * If predicate doesn't pass, implementation can do some best-effort actions to try to have predicate passing (e.g. download userSession from other DC)
      */
     UserSessionModel getUserSessionWithPredicate(RealmModel realm, String id, boolean offline, Predicate<UserSessionModel> predicate);
 
@@ -130,41 +173,28 @@ public interface UserSessionProvider extends Provider {
      */
     void removeExpired(RealmModel realm);
 
+    /**
+     * Removes all user sessions (regular and offline) from the specified realm.
+     *
+     * @param realm the realm whose sessions are to be removed.
+     */
     void removeUserSessions(RealmModel realm);
 
     /**
-     * @deprecated Use {@link UserLoginFailureProvider#getUserLoginFailure(RealmModel, String) getUserLoginFailure} instead.
+     * Callback method invoked when a realm is removed. Implementations should clear any sessions associated with the removed
+     * realm.
+     *
+     * @param realm a reference to the realm being removed.
      */
-    @Deprecated
-    default UserLoginFailureModel getUserLoginFailure(RealmModel realm, String userId) {
-        return getKeycloakSession().loginFailures().getUserLoginFailure(realm, userId);
-    }
-
-    /**
-     * @deprecated Use {@link UserLoginFailureProvider#addUserLoginFailure(RealmModel, String) addUserLoginFailure} instead.
-     */
-    @Deprecated
-    default UserLoginFailureModel addUserLoginFailure(RealmModel realm, String userId) {
-        return getKeycloakSession().loginFailures().addUserLoginFailure(realm, userId);
-    }
-
-    /**
-     * @deprecated Use {@link UserLoginFailureProvider#removeUserLoginFailure(RealmModel, String) removeUserLoginFailure} instead.
-     */
-    @Deprecated
-    default void removeUserLoginFailure(RealmModel realm, String userId) {
-        getKeycloakSession().loginFailures().removeUserLoginFailure(realm, userId);
-    }
-
-    /**
-     * @deprecated Use {@link UserLoginFailureProvider#removeAllUserLoginFailures(RealmModel) removeAllUserLoginFailures} instead.
-     */
-    @Deprecated
-    default void removeAllUserLoginFailures(RealmModel realm) {
-        getKeycloakSession().loginFailures().removeAllUserLoginFailures(realm);
-    }
-
     void onRealmRemoved(RealmModel realm);
+
+    /**
+     * Callback method invoked when a client is removed. Implementations should clear any sessions associated with the
+     * removed client.
+     *
+     * @param realm a reference to the realm.
+     * @param client a reference to the client being removed.
+     */
     void onClientRemoved(RealmModel realm, ClientModel client);
 
     /** Newly created userSession won't contain attached AuthenticatedClientSessions **/
@@ -186,8 +216,6 @@ public interface UserSessionProvider extends Provider {
      */
     Stream<UserSessionModel> getOfflineUserSessionsStream(RealmModel realm, UserModel user);
 
-    UserSessionModel getOfflineUserSessionByBrokerSessionId(RealmModel realm, String brokerSessionId);
-
     /**
      * Obtains the offline user sessions associated with the user that matches the specified {@code brokerUserId}.
      *
@@ -203,7 +231,7 @@ public interface UserSessionProvider extends Provider {
      * Obtains the offline user sessions associated with the specified client, starting from the {@code firstResult} and
      * containing at most {@code maxResults}.
      *
-     * @param realm a reference tot he realm.
+     * @param realm a reference to the realm.
      * @param client the client whose user sessions are being searched.
      * @param firstResult first result to return. Ignored if negative or {@code null}.
      * @param maxResults maximum number of results to return. Ignored if negative or {@code null}.
@@ -211,10 +239,34 @@ public interface UserSessionProvider extends Provider {
      */
     Stream<UserSessionModel> getOfflineUserSessionsStream(RealmModel realm, ClientModel client, Integer firstResult, Integer maxResults);
 
-    /** Triggered by persister during pre-load. It imports authenticatedClientSessions too **/
-    void importUserSessions(Collection<UserSessionModel> persistentUserSessions, boolean offline);
+    /** Triggered by persister during pre-load. It imports authenticatedClientSessions too.
+     *
+     * @deprecated Deprecated as offline session preloading was removed in KC25. This method will be removed in KC27.
+     */
+    @Deprecated(since = "26.4", forRemoval = true)
+    default void importUserSessions(Collection<UserSessionModel> persistentUserSessions, boolean offline) {}
 
     void close();
 
     int getStartupTime(RealmModel realm);
+
+    default void migrate(String modelVersion) {
+    }
+
+    /**
+     * Returns the {@link UserSessionModel} if the user session with ID {@code userSessionId} exist, and it has an
+     * {@link AuthenticatedClientSessionModel} from a {@link ClientModel} with ID {@code clientUUID}.
+     * <p>
+     * If the {@link AuthenticatedClientSessionModel} from the client or the {@link UserSessionModel} does not exist,
+     * this method returns {@code null}.
+     *
+     * @param realm         The {@link RealmModel} where the session belongs to.
+     * @param userSessionId The ID of the {@link UserSessionModel}.
+     * @param offline       If {@code true}, it fetches an offline session and, if {@code false}, an online session.
+     * @param clientUUID    The {@link ClientModel#getId()}.
+     * @return The {@link UserSessionModel} if it has a session from the {@code clientUUID}.
+     */
+    default UserSessionModel getUserSessionIfClientExists(RealmModel realm, String userSessionId, boolean offline, String clientUUID) {
+        return getUserSessionWithPredicate(realm, userSessionId, offline, userSession -> userSession.getAuthenticatedClientSessionByClient(clientUUID) != null);
+    }
 }

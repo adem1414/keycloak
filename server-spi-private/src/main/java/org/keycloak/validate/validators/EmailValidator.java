@@ -16,15 +16,21 @@
  */
 package org.keycloak.validate.validators;
 
-import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.regex.Pattern;
+import java.util.Set;
 
+import org.keycloak.email.EmailSenderProvider;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
 import org.keycloak.provider.ConfiguredProvider;
 import org.keycloak.provider.ProviderConfigProperty;
+import org.keycloak.provider.ProviderConfigurationBuilder;
+import org.keycloak.utils.EmailValidationUtil;
 import org.keycloak.validate.AbstractStringValidator;
 import org.keycloak.validate.ValidationContext;
 import org.keycloak.validate.ValidationError;
+import org.keycloak.validate.ValidationResult;
 import org.keycloak.validate.ValidatorConfig;
 
 /**
@@ -39,8 +45,9 @@ public class EmailValidator extends AbstractStringValidator implements Configure
 
     public static final String MESSAGE_INVALID_EMAIL = "error-invalid-email";
 
-    // Actually allow same emails like angular. See ValidationTest.testEmailValidation()
-    private static final Pattern EMAIL_PATTERN = Pattern.compile("[a-zA-Z0-9!#$%&'*+/=?^_`{|}~.-]+@[a-zA-Z0-9-]+(\\.[a-zA-Z0-9-]+)*");
+    public static final String MESSAGE_NON_ASCII_LOCAL_PART_EMAIL = "error-non-ascii-local-part-email";
+
+    public static final String MAX_LOCAL_PART_LENGTH_PROPERTY = "max-local-length";
 
     @Override
     public String getId() {
@@ -49,8 +56,38 @@ public class EmailValidator extends AbstractStringValidator implements Configure
 
     @Override
     protected void doValidate(String value, String inputHint, ValidationContext context, ValidatorConfig config) {
-        if (!EMAIL_PATTERN.matcher(value).matches()) {
+        Integer maxEmailLocalPartLength = null;
+        if (config != null) {
+            maxEmailLocalPartLength = config.getInt(MAX_LOCAL_PART_LENGTH_PROPERTY);
+        }
+
+        if (!(maxEmailLocalPartLength != null
+                ? EmailValidationUtil.isValidEmail(value, maxEmailLocalPartLength)
+                : EmailValidationUtil.isValidEmail(value))) {
             context.addError(new ValidationError(ID, inputHint, MESSAGE_INVALID_EMAIL, value));
+            return;
+        }
+
+        final KeycloakSession session = context.getSession();
+        if (session == null) {
+            return;
+        }
+
+        final RealmModel realm = session.getContext().getRealm();
+        if (realm == null || realm.getSmtpConfig() == null || realm.getSmtpConfig().isEmpty()
+                || "true".equals(realm.getSmtpConfig().get(EmailSenderProvider.CONFIG_ALLOW_UTF8))) {
+            // UTF-8 non-ascii chars allowed because no smtp configuration or allowutf8 is enabled
+            return;
+        }
+
+        final int idx = value.lastIndexOf('@');
+        if (idx < 0) {
+            return;
+        }
+
+        final String localPart = value.substring(0, idx);
+        if (!localPart.chars().allMatch(c -> c < 128)) {
+            context.addError(new ValidationError(ID, inputHint, MESSAGE_NON_ASCII_LOCAL_PART_EMAIL));
         }
     }
     
@@ -61,6 +98,25 @@ public class EmailValidator extends AbstractStringValidator implements Configure
 
     @Override
     public List<ProviderConfigProperty> getConfigProperties() {
-        return Collections.emptyList();
+        return ProviderConfigurationBuilder.create().property()
+                .name(MAX_LOCAL_PART_LENGTH_PROPERTY)
+                .type(ProviderConfigProperty.STRING_TYPE)
+                .label("Maximum length for the local part")
+                .helpText("Maximum length for the local part of the email")
+                .defaultValue(EmailValidationUtil.MAX_LOCAL_PART_LENGTH)
+                .required(false)
+                .add().build();
+    }
+
+    @Override
+    public ValidationResult validateConfig(KeycloakSession session, ValidatorConfig config) {
+        Set<ValidationError> errors = new LinkedHashSet<>();
+        if (config != null && config.containsKey(MAX_LOCAL_PART_LENGTH_PROPERTY)) {
+            Integer maxLocalPartLength = config.getInt(MAX_LOCAL_PART_LENGTH_PROPERTY);
+            if (maxLocalPartLength == null || maxLocalPartLength <= 0) {
+                errors.add(new ValidationError(ID, MAX_LOCAL_PART_LENGTH_PROPERTY, ValidatorConfigValidator.MESSAGE_CONFIG_INVALID_NUMBER_VALUE, config.get(MAX_LOCAL_PART_LENGTH_PROPERTY)));
+            }
+        }
+        return new ValidationResult(errors);
     }
 }

@@ -19,9 +19,11 @@ package org.keycloak.services.clientregistration.policy.impl;
 
 import java.net.InetAddress;
 import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.UnknownHostException;
-import java.util.LinkedList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -64,7 +66,6 @@ public class TrustedHostClientRegistrationPolicy implements ClientRegistrationPo
     }
 
 
-
     @Override
     public void beforeUpdate(ClientRegistrationContext context, ClientModel clientModel) throws ClientRegistrationPolicyException {
         verifyHost();
@@ -96,25 +97,34 @@ public class TrustedHostClientRegistrationPolicy implements ClientRegistrationPo
 
         String hostAddress = session.getContext().getConnection().getRemoteAddr();
 
-        logger.debugf("Verifying remote host : %s", hostAddress);
+        logger.debugf("Verifying remote host : %s", session.getContext().getConnection().getRemoteHost());
 
+        if (!verifyHost(hostAddress)) {
+            ServicesLogger.LOGGER.failedToVerifyRemoteHost(session.getContext().getConnection().getRemoteHost());
+            throw new ClientRegistrationPolicyException("Host not trusted.");
+        }
+    }
+
+    protected boolean verifyHost(String hostAddress) {
+        if (hostAddress == null) {
+            return false;
+        }
         List<String> trustedHosts = getTrustedHosts();
         List<String> trustedDomains = getTrustedDomains();
 
         // Verify trustedHosts by their IP addresses
         String verifiedHost = verifyHostInTrustedHosts(hostAddress, trustedHosts);
         if (verifiedHost != null) {
-            return;
+            return true;
         }
 
         // Verify domains if hostAddress hostname belongs to the domain. This assumes proper DNS setup
         verifiedHost = verifyHostInTrustedDomains(hostAddress, trustedDomains);
         if (verifiedHost != null) {
-            return;
+            return true;
         }
 
-        ServicesLogger.LOGGER.failedToVerifyRemoteHost(hostAddress);
-        throw new ClientRegistrationPolicyException("Host not trusted.");
+        return false;
     }
 
 
@@ -129,19 +139,8 @@ public class TrustedHostClientRegistrationPolicy implements ClientRegistrationPo
 
 
     protected List<String> getTrustedDomains() {
-        List<String> trustedHostsConfig = componentModel.getConfig().getList(TrustedHostClientRegistrationPolicyFactory.TRUSTED_HOSTS);
-        List<String> domains = new LinkedList<>();
-
-        for (String hostname : trustedHostsConfig) {
-            if (hostname.startsWith("*.")) {
-                hostname = hostname.substring(2);
-                domains.add(hostname);
-            }
-        }
-
-        return domains;
+        return componentModel.getConfig().getList(TrustedHostClientRegistrationPolicyFactory.TRUSTED_HOSTS);
     }
-
 
     protected String verifyHostInTrustedHosts(String hostAddress, List<String> trustedHosts) {
         for (String confHostName : trustedHosts) {
@@ -161,22 +160,53 @@ public class TrustedHostClientRegistrationPolicy implements ClientRegistrationPo
         return null;
     }
 
+    private boolean checkTrustedDomain(String hostname, String trustedDomain) {
+        if (trustedDomain.startsWith("*.")) {
+            String domain = trustedDomain.substring(2);
+            return hostname.equals(domain) || hostname.endsWith("." + domain);
+        }
+        return hostname.equals(trustedDomain);
+    }
 
     protected String verifyHostInTrustedDomains(String hostAddress, List<String> trustedDomains) {
-        if (!trustedDomains.isEmpty()) {
-            try {
-                String hostname = InetAddress.getByName(hostAddress).getHostName();
+        try {
+            InetAddress address = InetAddress.getByName(hostAddress);
+            String hostname = address.getHostName();
 
-                logger.debugf("Trying verify request from address '%s' of host '%s' by domains", hostAddress, hostname);
+            logger.debugf("Trying verify request from address '%s' of host '%s' by domains", hostAddress, hostname);
 
+            // On Windows, reverse lookup for loopback may return the IP (e.g., 127.0.0.1) instead of 'localhost'.
+            // Normalize to 'localhost' for consistent domain checks.
+            if (address.isLoopbackAddress()) {
+                hostname = "localhost";
+            } else if (hostname.equals(address.getHostAddress())) {
+                logger.debugf("The hostAddress '%s' was not resolved to a hostname", hostAddress);
+                return null;
+            }
+
+            // For non-loopback addresses, perform a forward-confirmation check: the hostname must resolve back to the same address.
+            if (!address.isLoopbackAddress() && Arrays.stream(InetAddress.getAllByName(hostname)).noneMatch(a -> address.equals(a))) {
+                logger.debugf("The hostAddress '%s' is not among the direct lookups returned resolving '%s'", hostAddress, hostname);
+                return null;
+            }
+
+            for (String confDomain : trustedDomains) {
+                if (checkTrustedDomain(hostname, confDomain)) {
+                    logger.debugf("Successfully verified host '%s' by trusted domain '%s'", hostname, confDomain);
+                    return hostname;
+                }
+            }
+        } catch (UnknownHostException uhe) {
+            logger.debugf(uhe, "Request of address '%s' came from unknown host. Skip verification by domains unless it's within localhost domain", hostAddress);
+
+            String lower = hostAddress == null ? null : hostAddress.toLowerCase();
+            if (lower != null && ("localhost".equals(lower) || lower.endsWith(".localhost"))) {
                 for (String confDomain : trustedDomains) {
-                    if (hostname.endsWith(confDomain)) {
-                        logger.debugf("Successfully verified host '%s' by trusted domain '%s'", hostname, confDomain);
-                        return hostname;
+                    if (checkTrustedDomain(lower, confDomain)) {
+                        logger.debugf("Treating host '%s' as loopback due to localhost domain and returning success by trusted domain '%s'", lower, confDomain);
+                        return lower;
                     }
                 }
-            } catch (UnknownHostException uhe) {
-                logger.debugf(uhe, "Request of address '%s' came from unknown host. Skip verification by domains", hostAddress);
             }
         }
 
@@ -214,26 +244,17 @@ public class TrustedHostClientRegistrationPolicy implements ClientRegistrationPo
             checkURLTrusted(adminUrl, trustedHosts, trustedDomains);
         }
         for (String redirect : resolvedRedirects) {
-            checkURLTrusted(redirect, trustedHosts, trustedDomains);
+            checkURITrusted(redirect, trustedHosts, trustedDomains);
         }
 
     }
-
 
     protected void checkURLTrusted(String url, List<String> trustedHosts, List<String> trustedDomains) throws ClientRegistrationPolicyException {
         try {
             String host = new URL(url).getHost();
 
-            for (String trustedHost : trustedHosts) {
-                if (host.equals(trustedHost)) {
-                    return;
-                }
-            }
-
-            for (String trustedDomain : trustedDomains) {
-                if (host.endsWith(trustedDomain)) {
-                    return;
-                }
+            if (checkHostTrusted(host, trustedHosts, trustedDomains)) {
+                return;
             }
         } catch (MalformedURLException mfe) {
             logger.debugf(mfe, "URL '%s' is malformed", url);
@@ -242,6 +263,38 @@ public class TrustedHostClientRegistrationPolicy implements ClientRegistrationPo
 
         ServicesLogger.LOGGER.urlDoesntMatch(url);
         throw new ClientRegistrationPolicyException("URL doesn't match any trusted host or trusted domain");
+    }
+
+    protected void checkURITrusted(String uri, List<String> trustedHosts, List<String> trustedDomains) throws ClientRegistrationPolicyException {
+        try {
+            String host = new URI(uri).getHost();
+
+            if (checkHostTrusted(host, trustedHosts, trustedDomains)) {
+                return;
+            }
+        } catch (URISyntaxException use) {
+            logger.debugf(use, "URI '%s' is malformed", uri);
+            throw new ClientRegistrationPolicyException("URI is malformed");
+        }
+
+        ServicesLogger.LOGGER.uriDoesntMatch(uri);
+        throw new ClientRegistrationPolicyException("URI doesn't match any trusted host or trusted domain");
+    }
+
+    private boolean checkHostTrusted(String host, List<String> trustedHosts, List<String> trustedDomains) {
+        for (String trustedHost : trustedHosts) {
+            if (host.equals(trustedHost)) {
+                return true;
+            }
+        }
+
+        for (String trustedDomain : trustedDomains) {
+            if (checkTrustedDomain(host, trustedDomain)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
 
@@ -270,6 +323,6 @@ public class TrustedHostClientRegistrationPolicy implements ClientRegistrationPo
     // True by default
     private boolean parseBoolean(String propertyKey) {
         String val = componentModel.getConfig().getFirst(propertyKey);
-        return val==null || Boolean.parseBoolean(val);
+        return val == null || Boolean.parseBoolean(val);
     }
 }

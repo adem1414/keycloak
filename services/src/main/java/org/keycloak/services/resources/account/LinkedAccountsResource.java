@@ -16,51 +16,54 @@
  */
 package org.keycloak.services.resources.account;
 
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
+import java.io.IOException;
+import java.text.MessageFormat;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.SortedSet;
-import java.util.TreeSet;
-import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import javax.ws.rs.DELETE;
-import javax.ws.rs.GET;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
-import org.jboss.resteasy.spi.HttpRequest;
+import org.keycloak.models.IdentityProviderQuery;
+import org.keycloak.common.Profile;
+import org.keycloak.common.Profile.Feature;
+import org.keycloak.http.HttpRequest;
 import org.keycloak.broker.social.SocialIdentityProvider;
-import org.keycloak.common.util.Base64Url;
 import org.keycloak.events.Details;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.events.EventType;
 import org.keycloak.models.AccountRoles;
-import org.keycloak.models.ClientModel;
 import org.keycloak.models.FederatedIdentityModel;
 import org.keycloak.models.IdentityProviderModel;
+import org.keycloak.models.IdentityProviderShowInAccountConsole;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.credential.PasswordCredentialModel;
 import org.keycloak.models.utils.KeycloakModelUtils;
+import org.keycloak.organization.utils.Organizations;
 import org.keycloak.provider.ProviderFactory;
 import org.keycloak.representations.account.AccountLinkUriRepresentation;
 import org.keycloak.representations.account.LinkedAccountRepresentation;
 import org.keycloak.services.ErrorResponse;
-import org.keycloak.services.Urls;
+import org.keycloak.services.cors.Cors;
 import org.keycloak.services.managers.Auth;
 import org.keycloak.services.messages.Messages;
-import org.keycloak.services.resources.Cors;
 import org.keycloak.services.validation.Validation;
+import org.keycloak.theme.Theme;
+import org.keycloak.utils.BrokerUtil;
+import org.keycloak.utils.StreamsUtil;
 
 import static org.keycloak.models.Constants.ACCOUNT_CONSOLE_CLIENT_ID;
 
@@ -71,57 +74,149 @@ import static org.keycloak.models.Constants.ACCOUNT_CONSOLE_CLIENT_ID;
  */
 public class LinkedAccountsResource {
     private static final Logger logger = Logger.getLogger(LinkedAccountsResource.class);
-    
+
     private final KeycloakSession session;
     private final HttpRequest request;
-    private final ClientModel client;
     private final EventBuilder event;
     private final UserModel user;
     private final RealmModel realm;
     private final Auth auth;
+    private final Set<String> socialIds;
 
-    public LinkedAccountsResource(KeycloakSession session, 
-                                  HttpRequest request, 
-                                  ClientModel client,
-                                  Auth auth, 
-                                  EventBuilder event, 
+    public LinkedAccountsResource(KeycloakSession session,
+                                  HttpRequest request,
+                                  Auth auth,
+                                  EventBuilder event,
                                   UserModel user) {
         this.session = session;
         this.request = request;
-        this.client = client;
         this.auth = auth;
         this.event = event;
         this.user = user;
-        realm = session.getContext().getRealm();
+        this.realm = session.getContext().getRealm();
+        this.socialIds = session.getKeycloakSessionFactory().getProviderFactoriesStream(SocialIdentityProvider.class)
+                .map(ProviderFactory::getId)
+                .collect(Collectors.toSet());
     }
-    
+
+    /**
+     * Returns the enabled identity providers the user is currently linked to, or those available for the user to link their
+     * account to.When the {@code linked} param is {@code true}, all providers currently linked to the user are returned in
+     * the form of {@link LinkedAccountRepresentation} objects, including those associated with organizations.
+     * </p>
+     * When the {@code linked} param is {@code false}, only the identity providers not linked to organizations (i.e. realm
+     * level providers) will be returned and be made available for linking.
+     *
+     * @param linked a {@link Boolean} indicating whether to return only the linked providers ({@code true}) or only the
+     *               providers available for linking ({@code false}).
+     * @param search Filter to search specific providers by name. Search can be prefixed (name*), contains (*name*) or exact (\"name\"). Default prefixed.
+     * @param firstResult Pagination offset.
+     * @param maxResults Maximum results size.
+     * @return a set of {@link LinkedAccountRepresentation} sorted by the {code guiOrder}.
+     */
     @GET
     @Path("/")
     @Produces(MediaType.APPLICATION_JSON)
-    public Response linkedAccounts() {
+    public Response linkedAccounts(
+            @QueryParam("linked") Boolean linked,
+            @QueryParam("search") String search,
+            @QueryParam("first") Integer firstResult,
+            @QueryParam("max") Integer maxResults
+    ) {
         auth.requireOneOf(AccountRoles.MANAGE_ACCOUNT, AccountRoles.VIEW_PROFILE);
-        SortedSet<LinkedAccountRepresentation> linkedAccounts = getLinkedAccounts(this.session, this.realm, this.user);
-        return Cors.add(request, Response.ok(linkedAccounts)).auth().allowedOrigins(auth.getToken()).build();
-    }
-    
-    private Set<String> findSocialIds() {
-       return session.getKeycloakSessionFactory().getProviderFactoriesStream(SocialIdentityProvider.class)
-               .map(ProviderFactory::getId)
-               .collect(Collectors.toSet());
+
+        // TODO: remove this statement once the console and the LinkedAccountsRestServiceTest are updated - this is only here for backwards compatibility
+        if (linked == null) {
+            List<LinkedAccountRepresentation> linkedAccounts = getLinkedAccounts(this.session, this.realm, this.user);
+            return Cors.builder().auth().allowedOrigins(auth.getToken()).add(Response.ok(linkedAccounts));
+        }
+
+        List<LinkedAccountRepresentation> linkedAccounts;
+        if (linked) {
+            // we want only linked accounts, fetch those from the federated identities.
+			Set<IdentityProviderShowInAccountConsole> includedShowInAccountConsoleValues = Set.of(IdentityProviderShowInAccountConsole.ALWAYS, IdentityProviderShowInAccountConsole.WHEN_LINKED);
+            linkedAccounts = StreamsUtil.paginatedStream(session.users().getFederatedIdentitiesStream(realm, user)
+                    .map(fedIdentity -> this.toLinkedAccount(session.identityProviders().getByAlias(fedIdentity.getIdentityProvider()), fedIdentity.getUserName(), includedShowInAccountConsoleValues))
+                    .filter(account -> account != null && this.matchesLinkedProvider(account, search))
+                    .sorted(), firstResult, maxResults)
+                    .toList();
+        } else {
+            // we want all enabled, realm-level identity providers available (i.e. not already linked) for the user to link their accounts to.
+            String fedAliasesToExclude = session.users().getFederatedIdentitiesStream(realm, user).map(FederatedIdentityModel::getIdentityProvider)
+                    .collect(Collectors.joining(","));
+
+            Map<String, String> searchOptions = Map.of(
+                    IdentityProviderModel.ENABLED, "true",
+                    IdentityProviderModel.ORGANIZATION_ID, "",
+                    IdentityProviderModel.SEARCH, search == null ? "" : search,
+                    IdentityProviderModel.ALIAS_NOT_IN, fedAliasesToExclude,
+					IdentityProviderModel.SHOW_IN_ACCOUNT_CONSOLE, IdentityProviderShowInAccountConsole.ALWAYS.name());
+
+            linkedAccounts = session.identityProviders().getAllStream(IdentityProviderQuery.userAuthentication().with(searchOptions), firstResult, maxResults)
+                    .map(idp -> this.toLinkedAccount(idp, null, null))
+                    .toList();
+        }
+        return Cors.builder().auth().allowedOrigins(auth.getToken()).add(Response.ok(linkedAccounts));
     }
 
-    public SortedSet<LinkedAccountRepresentation> getLinkedAccounts(KeycloakSession session, RealmModel realm, UserModel user) {
-        Set<String> socialIds = findSocialIds();
-        return realm.getIdentityProvidersStream().filter(IdentityProviderModel::isEnabled)
-                .map(provider -> toLinkedAccountRepresentation(provider, socialIds, session.users().getFederatedIdentitiesStream(realm, user)))
-                .collect(Collectors.toCollection(TreeSet::new));
+    private LinkedAccountRepresentation toLinkedAccount(IdentityProviderModel provider, String fedIdentity, Set<IdentityProviderShowInAccountConsole> includedShowInAccountConsoleValues) {
+        if (provider == null || !provider.isEnabled()) {
+            return null;
+        }
+		if (includedShowInAccountConsoleValues != null && !includedShowInAccountConsoleValues.contains(provider.getShowInAccountConsole())) {
+			return null;
+		}
+        LinkedAccountRepresentation rep = new LinkedAccountRepresentation();
+        rep.setConnected(fedIdentity != null);
+        rep.setSocial(socialIds.contains(provider.getProviderId()));
+        rep.setProviderAlias(provider.getAlias());
+        rep.setDisplayName(KeycloakModelUtils.getIdentityProviderDisplayName(session, provider));
+        rep.setGuiOrder(provider.getConfig() != null ? provider.getConfig().get("guiOrder") : null);
+        rep.setProviderName(provider.getAlias());
+        rep.setLinkedUsername(fedIdentity);
+        return rep;
     }
 
-    private LinkedAccountRepresentation toLinkedAccountRepresentation(IdentityProviderModel provider, Set<String> socialIds,
-                                                                      Stream<FederatedIdentityModel> identities) {
-        String providerId = provider.getAlias();
+    private boolean matchesLinkedProvider(final LinkedAccountRepresentation linkedAccount, final String search) {
+        if (search == null) {
+            return true;
+        }else if (search.startsWith("\"") && search.endsWith("\"")) {
+            final String name = search.substring(1, search.length() - 1);
+            return linkedAccount.getProviderAlias().equals(name) || linkedAccount.getDisplayName().equals(name);
+        } else if (search.startsWith("*") && search.endsWith("*")) {
+            final String name = search.substring(1, search.length() - 1);
+            return linkedAccount.getProviderAlias().contains(name) || linkedAccount.getDisplayName().contains(name);
+        } else if (search.endsWith("*")) {
+            final String name = search.substring(0, search.length() - 1);
+            return linkedAccount.getProviderAlias().startsWith(name) || linkedAccount.getDisplayName().startsWith(name);
+        } else {
+            return linkedAccount.getProviderAlias().startsWith(search) || linkedAccount.getDisplayName().startsWith(search);
+        }
+    }
 
-        FederatedIdentityModel identity = getIdentity(identities, providerId);
+    @Deprecated
+    public List<LinkedAccountRepresentation> getLinkedAccounts(KeycloakSession session, RealmModel realm, UserModel user) {
+        return session.identityProviders().getAllStream(IdentityProviderQuery.userAuthentication().with(IdentityProviderModel.ENABLED, "true"), null, null)
+                .map(provider -> toLinkedAccountRepresentation(provider, session.users().getFederatedIdentitiesStream(realm, user)))
+                .filter(Objects::nonNull)
+                .sorted().toList();
+    }
+
+    @Deprecated
+    private LinkedAccountRepresentation toLinkedAccountRepresentation(IdentityProviderModel provider, Stream<FederatedIdentityModel> identities) {
+        String providerAlias = provider.getAlias();
+
+        FederatedIdentityModel identity = getIdentity(identities, providerAlias);
+        // if idp is not yet linked and is currently bound to an organization, it should not be available for linking.
+        if (identity == null && provider.getOrganizationId() != null) return null;
+		boolean hide = switch (provider.getShowInAccountConsole()) {
+			case ALWAYS -> false;
+			case WHEN_LINKED -> identity == null;
+			case NEVER -> true;
+		};
+		if (hide) {
+			return null;
+		}
 
         String displayName = KeycloakModelUtils.getIdentityProviderDisplayName(session, provider);
         String guiOrder = provider.getConfig() != null ? provider.getConfig().get("guiOrder") : null;
@@ -129,7 +224,7 @@ public class LinkedAccountsResource {
         LinkedAccountRepresentation rep = new LinkedAccountRepresentation();
         rep.setConnected(identity != null);
         rep.setSocial(socialIds.contains(provider.getProviderId()));
-        rep.setProviderAlias(providerId);
+        rep.setProviderAlias(providerAlias);
         rep.setDisplayName(displayName);
         rep.setGuiOrder(guiOrder);
         rep.setProviderName(provider.getAlias());
@@ -139,83 +234,83 @@ public class LinkedAccountsResource {
         return rep;
     }
 
-    private FederatedIdentityModel getIdentity(Stream<FederatedIdentityModel> identities, String providerId) {
-        return identities.filter(model -> Objects.equals(model.getIdentityProvider(), providerId))
+    @Deprecated
+    private FederatedIdentityModel getIdentity(Stream<FederatedIdentityModel> identities, String providerAlias) {
+        return identities.filter(model -> Objects.equals(model.getIdentityProvider(), providerAlias))
                 .findFirst().orElse(null);
     }
-    
+
+    /**
+     * Creating URL, which can be used to redirect to link identity provider with currently authenticated user
+     *
+     * @deprecated It is recommended to trigger linking identity provider account with the use of "idp_link" kc_action.
+     * @return response
+     */
     @GET
-    @Path("/{providerId}")
+    @Path("/{providerAlias}")
     @Produces(MediaType.APPLICATION_JSON)
     @Deprecated
-    public Response buildLinkedAccountURI(@PathParam("providerId") String providerId, 
+    public Response buildLinkedAccountURI(@PathParam("providerAlias") String providerAlias,
                                      @QueryParam("redirectUri") String redirectUri) {
         auth.require(AccountRoles.MANAGE_ACCOUNT);
-        
+        logger.warnf("Using deprecated endpoint of Account REST service for linking user '%s' in the realm '%s' to identity provider '%s'. It is recommended to use application initiated actions (AIA) for linking identity provider with the user.",
+                user.getUsername(),
+                realm.getName(),
+                providerAlias);
         if (redirectUri == null) {
             ErrorResponse.error(Messages.INVALID_REDIRECT_URI, Response.Status.BAD_REQUEST);
         }
-        
-        String errorMessage = checkCommonPreconditions(providerId);
+
+        String errorMessage = checkCommonPreconditions(providerAlias);
         if (errorMessage != null) {
-            return ErrorResponse.error(errorMessage, Response.Status.BAD_REQUEST);
+            throw ErrorResponse.error(errorMessage, Response.Status.BAD_REQUEST);
         }
         if (auth.getSession() == null) {
-            return ErrorResponse.error(Messages.SESSION_NOT_ACTIVE, Response.Status.BAD_REQUEST);
+            throw ErrorResponse.error(Messages.SESSION_NOT_ACTIVE, Response.Status.BAD_REQUEST);
         }
-        
+
         try {
-            String nonce = UUID.randomUUID().toString();
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            String input = nonce + auth.getSession().getId() +  ACCOUNT_CONSOLE_CLIENT_ID + providerId;
-            byte[] check = md.digest(input.getBytes(StandardCharsets.UTF_8));
-            String hash = Base64Url.encode(check);
-            URI linkUri = Urls.identityProviderLinkRequest(this.session.getContext().getUri().getBaseUri(), providerId, realm.getName());
-            linkUri = UriBuilder.fromUri(linkUri)
-                    .queryParam("nonce", nonce)
-                    .queryParam("hash", hash)
-                    // need to use "account-console" client because IdentityBrokerService authenticates user using cookies
-                    // the regular "account" client is used only for REST calls therefore cookies authentication cannot be used
-                    .queryParam("client_id", ACCOUNT_CONSOLE_CLIENT_ID)
-                    .queryParam("redirect_uri", redirectUri)
-                    .build();
-            
-            AccountLinkUriRepresentation rep = new AccountLinkUriRepresentation();
-            rep.setAccountLinkUri(linkUri);
-            rep.setHash(hash);
-            rep.setNonce(nonce);
-            
-            return Cors.add(request, Response.ok(rep)).auth().allowedOrigins(auth.getToken()).build();
+            AccountLinkUriRepresentation rep = BrokerUtil.createClientInitiatedLinkURI(ACCOUNT_CONSOLE_CLIENT_ID, redirectUri, providerAlias, realm.getName(), auth.getSession().getId(), this.session.getContext().getUri().getBaseUri());
+
+            return Cors.builder().auth().allowedOrigins(auth.getToken()).add(Response.ok(rep));
         } catch (Exception spe) {
             spe.printStackTrace();
-            return ErrorResponse.error(Messages.FAILED_TO_PROCESS_RESPONSE, Response.Status.INTERNAL_SERVER_ERROR);
+            throw ErrorResponse.error(Messages.FAILED_TO_PROCESS_RESPONSE, Response.Status.INTERNAL_SERVER_ERROR);
         }
     }
-    
+
     @DELETE
-    @Path("/{providerId}")
+    @Path("/{providerAlias}")
     @Produces(MediaType.APPLICATION_JSON)
-    public Response removeLinkedAccount(@PathParam("providerId") String providerId) {
+    public Response removeLinkedAccount(@PathParam("providerAlias") String providerAlias) {
         auth.require(AccountRoles.MANAGE_ACCOUNT);
-        
-        String errorMessage = checkCommonPreconditions(providerId);
+
+        String errorMessage = checkCommonPreconditions(providerAlias);
         if (errorMessage != null) {
-            return ErrorResponse.error(errorMessage, Response.Status.BAD_REQUEST);
+            throw ErrorResponse.error(errorMessage, Response.Status.BAD_REQUEST);
         }
-        
-        FederatedIdentityModel link = session.users().getFederatedIdentity(realm, user, providerId);
+
+        FederatedIdentityModel link = session.users().getFederatedIdentity(realm, user, providerAlias);
         if (link == null) {
-            return ErrorResponse.error(Messages.FEDERATED_IDENTITY_NOT_ACTIVE, Response.Status.BAD_REQUEST);
+            throw ErrorResponse.error(translateErrorMessage(Messages.FEDERATED_IDENTITY_NOT_ACTIVE), Response.Status.BAD_REQUEST);
+        }
+
+        if (Profile.isFeatureEnabled(Feature.ORGANIZATION)) {
+            if (Organizations.resolveHomeBroker(session, user).stream()
+                    .map(IdentityProviderModel::getAlias)
+                    .anyMatch(providerAlias::equals)) {
+                throw ErrorResponse.error(translateErrorMessage(Messages.FEDERATED_IDENTITY_BOUND_ORGANIZATION), Response.Status.BAD_REQUEST);
+            }
         }
 
         // Removing last social provider is not possible if you don't have other possibility to authenticate
-        if (!(session.users().getFederatedIdentitiesStream(realm, user).count() > 1 || user.getFederationLink() != null || isPasswordSet())) {
-            return ErrorResponse.error(Messages.FEDERATED_IDENTITY_REMOVING_LAST_PROVIDER, Response.Status.BAD_REQUEST);
+        if (!(session.users().getFederatedIdentitiesStream(realm, user).count() > 1 || user.isFederated() || isPasswordSet())) {
+            throw ErrorResponse.error(translateErrorMessage(Messages.FEDERATED_IDENTITY_REMOVING_LAST_PROVIDER), Response.Status.BAD_REQUEST);
         }
-        
-        session.users().removeFederatedIdentity(realm, user, providerId);
 
-        logger.debugv("Social provider {0} removed successfully from user {1}", providerId, user.getUsername());
+        session.users().removeFederatedIdentity(realm, user, providerAlias);
+
+        logger.debugv("Social provider {0} removed successfully from user {1}", providerAlias, user.getUsername());
 
         event.event(EventType.REMOVE_FEDERATED_IDENTITY).client(auth.getClient()).user(auth.getUser())
                 .detail(Details.USERNAME, auth.getUser().getUsername())
@@ -223,32 +318,42 @@ public class LinkedAccountsResource {
                 .detail(Details.IDENTITY_PROVIDER_USERNAME, link.getUserName())
                 .success();
 
-        return Cors.add(request, Response.noContent()).auth().allowedOrigins(auth.getToken()).build();
+        return Cors.builder().auth().allowedOrigins(auth.getToken()).add(Response.noContent());
     }
-    
-    private String checkCommonPreconditions(String providerId) {
+
+    private String checkCommonPreconditions(String providerAlias) {
         auth.require(AccountRoles.MANAGE_ACCOUNT);
-        
-        if (Validation.isEmpty(providerId)) {
+
+        if (Validation.isEmpty(providerAlias)) {
             return Messages.MISSING_IDENTITY_PROVIDER;
         }
-        
-        if (!isValidProvider(providerId)) {
+
+        if (!isValidProvider(providerAlias)) {
             return Messages.IDENTITY_PROVIDER_NOT_FOUND;
         }
-        
+
         if (!user.isEnabled()) {
             return Messages.ACCOUNT_DISABLED;
         }
-        
+
         return null;
     }
-    
+
+    private String translateErrorMessage(String errorCode, Object... params) {
+        try {
+            Locale locale = session.getContext().resolveLocale(user);
+            String pattern = session.theme().getTheme(Theme.Type.ACCOUNT).getMessages(locale).getProperty(errorCode);
+            return new MessageFormat(pattern, locale).format(params, new StringBuffer(), null).toString();
+        } catch (IOException e) {
+            return errorCode;
+        }
+    }
+
     private boolean isPasswordSet() {
         return user.credentialManager().isConfiguredFor(PasswordCredentialModel.TYPE);
     }
-    
-    private boolean isValidProvider(String providerId) {
-        return realm.getIdentityProvidersStream().anyMatch(model -> Objects.equals(model.getAlias(), providerId));
+
+    private boolean isValidProvider(String providerAlias) {
+        return session.identityProviders().getByAlias(providerAlias) != null;
     }
 }

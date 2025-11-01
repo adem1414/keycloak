@@ -23,18 +23,18 @@ import org.keycloak.representations.idm.GroupRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.representations.idm.UserSessionRepresentation;
 
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.DefaultValue;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.DefaultValue;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.util.List;
 import java.util.Map;
 
@@ -47,6 +47,9 @@ public interface UserResource {
 
     @GET
     UserRepresentation toRepresentation();
+
+    @GET
+    UserRepresentation toRepresentation(@QueryParam("userProfileMetadata") boolean userProfileMetadata);
 
     @PUT
     void update(UserRepresentation userRepresentation);
@@ -68,13 +71,18 @@ public interface UserResource {
     List<GroupRepresentation> groups(@QueryParam("search") String search,
                                      @QueryParam("first") Integer firstResult,
                                      @QueryParam("max") Integer maxResults);
-    
+
     @Path("groups")
     @GET
     List<GroupRepresentation> groups(@QueryParam("first") Integer firstResult,
                                      @QueryParam("max") Integer maxResults,
                                      @QueryParam("briefRepresentation") @DefaultValue("true") boolean briefRepresentation);
-    
+
+    @Path("groups")
+    @GET
+    List<GroupRepresentation> groups(@QueryParam("search") String search,
+                                     @QueryParam("briefRepresentation") @DefaultValue("true") boolean briefRepresentation);
+
     @Path("groups")
     @GET
     List<GroupRepresentation> groups(@QueryParam("search") String search,
@@ -132,7 +140,7 @@ public interface UserResource {
      * Update a credential label for a user
      */
     @PUT
-    @Consumes(javax.ws.rs.core.MediaType.TEXT_PLAIN)
+    @Consumes(jakarta.ws.rs.core.MediaType.TEXT_PLAIN)
     @Path("credentials/{credentialId}/userLabel")
     void setCredentialUserLabel(final @PathParam("credentialId") String credentialId, String userLabel);
 
@@ -261,6 +269,30 @@ public interface UserResource {
     @Path("send-verify-email")
     void sendVerifyEmail(@QueryParam("client_id") String clientId);
 
+    @PUT
+    @Path("send-verify-email")
+    void sendVerifyEmail(@QueryParam("client_id") String clientId, @QueryParam("redirect_uri") String redirectUri);
+
+    @PUT
+    @Path("send-verify-email")
+    void sendVerifyEmail(@QueryParam("lifespan") Integer lifespan);
+
+    /**
+     * Send an email-verification email to the user
+     *
+     * An email contains a link the user can click to verify their email address.
+     * The redirectUri and clientId parameters are optional. The default for the
+     * redirect is the account client. The default for the lifespan is 12 hours.
+     *
+     * @param redirectUri Redirect uri
+     * @param clientId Client id
+     * @param lifespan Number of seconds after which the generated token expires
+     * @return
+     */
+    @PUT
+    @Path("send-verify-email")
+    void sendVerifyEmail(@QueryParam("client_id") String clientId, @QueryParam("redirect_uri") String redirectUri, @QueryParam("lifespan") Integer lifespan);
+
     @GET
     @Path("sessions")
     List<UserSessionRepresentation> getUserSessions();
@@ -297,4 +329,13 @@ public interface UserResource {
     @Path("impersonation")
     @Produces(MediaType.APPLICATION_JSON)
     Map<String, Object> impersonate();
+
+    /**
+     * @since Keycloak server 24.0.6
+     * @return unmanaged attributes of the user
+     */
+    @GET
+    @Path("unmanagedAttributes")
+    @Produces(MediaType.APPLICATION_JSON)
+    Map<String, List<String>> getUnmanagedAttributes();
 }

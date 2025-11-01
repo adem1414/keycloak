@@ -17,6 +17,10 @@
 
 package org.keycloak.exportimport;
 
+import java.io.Closeable;
+import java.util.Optional;
+import java.util.stream.Stream;
+
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
@@ -26,6 +30,8 @@ public class ExportImportConfig {
     public static final String ACTION = PREFIX + "action";
     public static final String ACTION_EXPORT = "export";
     public static final String ACTION_IMPORT = "import";
+
+    public static final String SINGLE_TRANSACTION = PREFIX + "single-transaction";
 
     public static final String PROVIDER = PREFIX + "provider";
     public static final String PROVIDER_DEFAULT = "dir";
@@ -38,6 +44,9 @@ public class ExportImportConfig {
 
     // used for "singleFile" provider
     public static final String FILE = PREFIX + "file";
+
+    // used for replacing placeholders
+    public static final String REPLACE_PLACEHOLDERS = PREFIX + "replace-placeholders";
 
     // How to export users when realm export is requested for "dir" provider
     public static final String USERS_EXPORT_STRATEGY = PREFIX + "usersExportStrategy";
@@ -55,20 +64,25 @@ public class ExportImportConfig {
         return System.getProperty(ACTION);
     }
 
-    public static void setAction(String exportImportAction) {
-        System.setProperty(ACTION, exportImportAction);
+    public static String getStrategy() {
+        return System.getProperty(STRATEGY);
     }
 
-    public static String getProvider() {
-        return System.getProperty(PROVIDER, PROVIDER_DEFAULT);
+    public static String setStrategy(Strategy strategy) {
+        return System.setProperty(STRATEGY, strategy.toString());
+    }
+
+    public static Optional<String> getDir() {
+        return Optional.ofNullable(System.getProperty(DIR));
+    }
+
+    public static Closeable setAction(String exportImportAction) {
+        System.setProperty(ACTION, exportImportAction);
+        return () -> System.getProperties().remove(ACTION);
     }
 
     public static void setProvider(String exportImportProvider) {
         System.setProperty(PROVIDER, exportImportProvider);
-    }
-
-    public static String getRealmName() {
-        return System.getProperty(REALM_NAME);
     }
 
     public static void setRealmName(String realmName) {
@@ -79,42 +93,33 @@ public class ExportImportConfig {
         }
     }
 
-    public static String getDir() {
-        return System.getProperty(DIR);
-    }
-
-    public static String setDir(String dir) {
-        return System.setProperty(DIR, dir);
-    }
-
-    public static String getFile() {
-        return System.getProperty(FILE);
+    public static void setDir(String dir) {
+        System.setProperty(DIR, dir);
     }
 
     public static void setFile(String file) {
         System.setProperty(FILE, file);
     }
 
-    public static UsersExportStrategy getUsersExportStrategy() {
-        String usersExportStrategy = System.getProperty(USERS_EXPORT_STRATEGY, DEFAULT_USERS_EXPORT_STRATEGY.toString());
-        return Enum.valueOf(UsersExportStrategy.class, usersExportStrategy);
+    public static boolean isReplacePlaceholders() {
+        return Boolean.getBoolean(REPLACE_PLACEHOLDERS);
     }
 
-    public static void setUsersExportStrategy(UsersExportStrategy usersExportStrategy) {
-        System.setProperty(USERS_EXPORT_STRATEGY, usersExportStrategy.toString());
+    public static void setReplacePlaceholders(boolean replacePlaceholders) {
+        System.setProperty(REPLACE_PLACEHOLDERS, String.valueOf(replacePlaceholders));
     }
 
-    public static Integer getUsersPerFile() {
-        String usersPerFile = System.getProperty(USERS_PER_FILE, String.valueOf(DEFAULT_USERS_PER_FILE));
-        return Integer.parseInt(usersPerFile.trim());
+    public static void reset() {
+        Stream.of(FILE, DIR, ACTION, STRATEGY, REPLACE_PLACEHOLDERS)
+                .forEach(prop -> System.getProperties().remove(prop));
     }
 
-    public static void setUsersPerFile(Integer usersPerFile) {
-        System.setProperty(USERS_PER_FILE, String.valueOf(usersPerFile));
+    public static void setSingleTransaction(boolean b) {
+        System.setProperty(SINGLE_TRANSACTION, String.valueOf(b));
     }
 
-    public static Strategy getStrategy() {
-        String strategy = System.getProperty(STRATEGY, DEFAULT_STRATEGY.toString());
-        return Enum.valueOf(Strategy.class, strategy);
+    public static boolean isSingleTransaction() {
+        return Optional.ofNullable(System.getProperty(SINGLE_TRANSACTION)).map(Boolean::valueOf).orElse(Boolean.TRUE);
     }
+
 }

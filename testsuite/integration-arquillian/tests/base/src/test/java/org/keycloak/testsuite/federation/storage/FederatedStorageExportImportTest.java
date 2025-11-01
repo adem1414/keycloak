@@ -18,7 +18,6 @@ package org.keycloak.testsuite.federation.storage;
 
 import org.junit.After;
 import org.junit.Assert;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 import org.keycloak.admin.client.resource.RealmResource;
@@ -31,6 +30,7 @@ import org.keycloak.exportimport.dir.DirExportProviderFactory;
 import org.keycloak.exportimport.singlefile.SingleFileExportProviderFactory;
 import org.keycloak.models.GroupModel;
 import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.ModelDuplicateException;
 import org.keycloak.models.PasswordPolicy;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RoleModel;
@@ -39,11 +39,14 @@ import org.keycloak.services.managers.RealmManager;
 import org.keycloak.storage.UserStorageUtil;
 import org.keycloak.testsuite.AbstractAuthTest;
 
-import javax.ws.rs.NotFoundException;
+import java.io.Closeable;
+import jakarta.ws.rs.NotFoundException;
 import java.io.File;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static org.junit.Assert.assertEquals;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -58,8 +61,6 @@ public class FederatedStorageExportImportTest extends AbstractAuthTest {
 
     @Before
     public void setDirs() {
-        Assume.assumeTrue("RealmProvider is not 'jpa'", isJpaRealmProvider());
-
         File baseDir = new File(System.getProperty("auth.server.config.dir", "target"));
 
         exportFileAbsolutePath = new File (baseDir, "singleFile-full.json").getAbsolutePath();
@@ -85,11 +86,11 @@ public class FederatedStorageExportImportTest extends AbstractAuthTest {
     }
 
     public static PasswordHashProvider getHashProvider(KeycloakSession session, PasswordPolicy policy) {
-        PasswordHashProvider hash = session.getProvider(PasswordHashProvider.class, policy.getHashAlgorithm());
-        if (hash == null) {
-            return session.getProvider(PasswordHashProvider.class, PasswordPolicy.HASH_ALGORITHM_DEFAULT);
+        if (policy != null && policy.getHashAlgorithm() != null) {
+            return session.getProvider(PasswordHashProvider.class, policy.getHashAlgorithm());
+        } else {
+            return session.getProvider(PasswordHashProvider.class);
         }
-        return hash;
     }
 
 
@@ -125,15 +126,17 @@ public class FederatedStorageExportImportTest extends AbstractAuthTest {
             ExportImportConfig.setProvider(SingleFileExportProviderFactory.PROVIDER_ID);
             ExportImportConfig.setFile(exportFileAbsolutePath);
             ExportImportConfig.setRealmName(REALM_NAME);
-            ExportImportConfig.setAction(ExportImportConfig.ACTION_EXPORT);
-            new ExportImportManager(session).runExport();
+            try (Closeable c = ExportImportConfig.setAction(ExportImportConfig.ACTION_EXPORT)) {
+                new ExportImportManager(session).runExport();
+            }
             session.realms().removeRealm(realmId);
         });
 
         testingClient.server().run(session -> {
             Assert.assertNull(session.realms().getRealmByName(REALM_NAME));
-            ExportImportConfig.setAction(ExportImportConfig.ACTION_IMPORT);
-            new ExportImportManager(session).runImport();
+            try (Closeable c = ExportImportConfig.setAction(ExportImportConfig.ACTION_IMPORT)) {
+                new ExportImportManager(session).runImport();
+            }
         });
 
         testingClient.server().run(session -> {
@@ -157,6 +160,73 @@ public class FederatedStorageExportImportTest extends AbstractAuthTest {
             Assert.assertEquals(1, creds.size());
             Assert.assertTrue(FederatedStorageExportImportTest.getHashProvider(session, realm.getPasswordPolicy())
                     .verify("password", PasswordCredentialModel.createFromCredentialModel(creds.get(0))));
+        });
+    }
+
+    @Test
+    public void testCreateCredentialWithDuplicateUserLabelShouldFail() {
+        final String userId = "f:1:testUser";
+
+        testingClient.server().run(session -> {
+            RealmModel realm = new RealmManager(session).createRealm(REALM_NAME);
+            UserStorageUtil.userFederatedStorage(session).setSingleAttribute(realm, userId, "dummy", "value");
+
+            PasswordCredentialModel cred1 = FederatedStorageExportImportTest
+                    .getHashProvider(session, realm.getPasswordPolicy())
+                    .encodedCredential("secret1", realm.getPasswordPolicy().getHashIterations());
+            cred1.setUserLabel("MyDevice");
+            UserStorageUtil.userFederatedStorage(session).createCredential(realm, userId, cred1);
+
+            PasswordCredentialModel cred2 = FederatedStorageExportImportTest
+                    .getHashProvider(session, realm.getPasswordPolicy())
+                    .encodedCredential("secret2", realm.getPasswordPolicy().getHashIterations());
+            cred2.setUserLabel("MyDevice");
+
+            try {
+                UserStorageUtil.userFederatedStorage(session).createCredential(realm, userId, cred2);
+                Assert.fail("Expected ModelDuplicateException was not thrown");
+            } catch (ModelDuplicateException ex) {
+                assertEquals("Device already exists with the same name", ex.getMessage());
+            }
+        });
+    }
+
+    @Test
+    public void testUpdateCredentialWithDuplicateUserLabelShouldFail() {
+        final String userId = "f:1:testUser";
+
+        testingClient.server().run(session -> {
+            RealmModel realm = new RealmManager(session).createRealm(REALM_NAME);
+            UserStorageUtil.userFederatedStorage(session).setSingleAttribute(realm, userId, "dummy", "value");
+
+            // Create first credential with label "DeviceOne"
+            PasswordCredentialModel cred1 = FederatedStorageExportImportTest
+                    .getHashProvider(session, realm.getPasswordPolicy())
+                    .encodedCredential("secret1", realm.getPasswordPolicy().getHashIterations());
+            cred1.setUserLabel("DeviceOne");
+            UserStorageUtil.userFederatedStorage(session).createCredential(realm, userId, cred1);
+
+            // Create second credential with label "DeviceTwo"
+            PasswordCredentialModel cred2 = FederatedStorageExportImportTest
+                    .getHashProvider(session, realm.getPasswordPolicy())
+                    .encodedCredential("secret2", realm.getPasswordPolicy().getHashIterations());
+            cred2.setUserLabel("DeviceTwo");
+            UserStorageUtil.userFederatedStorage(session).createCredential(realm, userId, cred2);
+
+            CredentialModel credentialModelUpdate = UserStorageUtil.userFederatedStorage(session)
+                    .getStoredCredentialsStream(realm, userId)
+                    .filter(c -> "DeviceTwo".equals(c.getUserLabel()))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalStateException("Credential not found"));
+
+            credentialModelUpdate.setUserLabel("DeviceOne");
+
+            try {
+                UserStorageUtil.userFederatedStorage(session).updateCredential(realm, userId, credentialModelUpdate);
+                Assert.fail("Expected ModelDuplicateException was not thrown");
+            } catch (ModelDuplicateException ex) {
+                assertEquals("Device already exists with the same name", ex.getMessage());
+            }
         });
     }
 
@@ -193,16 +263,18 @@ public class FederatedStorageExportImportTest extends AbstractAuthTest {
             ExportImportConfig.setProvider(DirExportProviderFactory.PROVIDER_ID);
             ExportImportConfig.setDir(exportDirAbsolutePath);
             ExportImportConfig.setRealmName(REALM_NAME);
-            ExportImportConfig.setAction(ExportImportConfig.ACTION_EXPORT);
-            new ExportImportManager(session).runExport();
+            try (Closeable c = ExportImportConfig.setAction(ExportImportConfig.ACTION_EXPORT)) {
+                new ExportImportManager(session).runExport();
+            }
             session.realms().removeRealm(realmId);
         });
 
 
         testingClient.server().run(session -> {
             Assert.assertNull(session.realms().getRealmByName(REALM_NAME));
-            ExportImportConfig.setAction(ExportImportConfig.ACTION_IMPORT);
-            new ExportImportManager(session).runImport();
+            try (Closeable c = ExportImportConfig.setAction(ExportImportConfig.ACTION_IMPORT)) {
+                new ExportImportManager(session).runImport();
+            }
         });
 
         testingClient.server().run(session -> {

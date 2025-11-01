@@ -18,15 +18,15 @@ package org.keycloak.provider;
 
 import org.jboss.logging.Logger;
 import org.keycloak.common.util.MultivaluedHashMap;
+import org.keycloak.services.DefaultKeycloakSessionFactory;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
-import java.util.Set;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -49,8 +49,7 @@ public class ProviderManager {
 
         logger.debugv("Provider loaders {0}", factories);
 
-        loaders.add(new DefaultProviderLoader(info, baseClassLoader));
-        loaders.add(new DeploymentProviderLoader(info));
+        addDefaultLoaders(baseClassLoader);
 
         if (resources != null) {
             for (String r : resources) {
@@ -72,6 +71,20 @@ public class ProviderManager {
             }
         }
     }
+
+    public ProviderManager(KeycloakDeploymentInfo info, ClassLoader baseClassLoader, Collection<ProviderLoader> additionalProviderLoaders) {
+        this.info = info;
+        addDefaultLoaders(baseClassLoader);
+        if (additionalProviderLoaders != null) {
+            loaders.addAll(additionalProviderLoaders);
+        }
+    }
+
+    private void addDefaultLoaders(ClassLoader baseClassLoader) {
+        loaders.add(new DefaultProviderLoader(info, baseClassLoader));
+        loaders.add(new DeploymentProviderLoader(info));
+    }
+
     public synchronized List<Spi> loadSpis() {
         // Use a map to prevent duplicates, since the loaders may have overlapping classpaths.
         Map<String, Spi> spiMap = new HashMap<>();
@@ -89,22 +102,44 @@ public class ProviderManager {
     public synchronized List<ProviderFactory> load(Spi spi) {
         if (!cache.containsKey(spi.getProviderClass())) {
 
-            Set<String> loaded = new HashSet<>();
+            Map<String, ProviderFactory> loaded = new HashMap<>();
             for (ProviderLoader loader : loaders) {
                 List<ProviderFactory> f = loader.load(spi);
                 if (f != null) {
                     for (ProviderFactory pf: f) {
                         String uniqueId = spi.getName() + "-" + pf.getId();
-                        if (!loaded.contains(uniqueId)) {
-                            cache.add(spi.getProviderClass(), pf);
-                            loaded.add(uniqueId);
+                        if (!loaded.containsKey(uniqueId)) {
+                            loaded.put(uniqueId, pf);
+                        } else {
+                            ProviderFactory currentFactory = loaded.get(uniqueId);
+                            ProviderFactory factoryToUse = compareFactories(currentFactory, pf);
+                            loaded.put(uniqueId, factoryToUse);
+
+                            logger.debugf("Found multiple provider factories of same provider ID implementing same SPI. SPI is '%s', providerFactory ID '%s'. Factories are '%s' and '%s'. Using provider factory '%s'.",
+                                    spi.getName(), pf.getId(), currentFactory.getClass().getName(), pf.getClass().getName(), factoryToUse.getClass().getName());
                         }
                     }
                 }
             }
+
+            for (ProviderFactory providerFactory : loaded.values()) {
+                cache.add(spi.getProviderClass(), providerFactory);
+            }
         }
         List<ProviderFactory> rtn = cache.get(spi.getProviderClass());
         return rtn == null ? Collections.EMPTY_LIST : rtn;
+    }
+
+    // Compare provider factories of same providerId. Just one of them needs to be chosen to be used in Keycloak
+    public ProviderFactory compareFactories(ProviderFactory p1, ProviderFactory p2) {
+        if (p1.order() != p2.order()) return (p1.order() > p2.order()) ? p1 : p2;
+
+        // Internal factory is supposed to be overriden by custom factory
+        if (DefaultKeycloakSessionFactory.isInternal(p1) ^ DefaultKeycloakSessionFactory.isInternal(p2)) {
+            return DefaultKeycloakSessionFactory.isInternal(p1) ? p2 : p1;
+        }
+
+        return p1;
     }
 
     /**

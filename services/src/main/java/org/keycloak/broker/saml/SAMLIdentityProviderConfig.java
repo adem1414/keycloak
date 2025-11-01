@@ -21,11 +21,11 @@ import static org.keycloak.common.util.UriUtils.checkUrl;
 import org.keycloak.common.enums.SslRequired;
 import org.keycloak.dom.saml.v2.protocol.AuthnContextComparisonType;
 import org.keycloak.models.IdentityProviderModel;
-import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.protocol.saml.SamlPrincipalType;
 import org.keycloak.saml.common.constants.JBossSAMLURIConstants;
 import org.keycloak.saml.common.util.XmlKeyInfoKeyNameTransformer;
+import org.keycloak.utils.StringUtil;
 
 /**
  * @author Pedro Igor
@@ -44,10 +44,13 @@ public class SAMLIdentityProviderConfig extends IdentityProviderModel {
     public static final String POST_BINDING_AUTHN_REQUEST = "postBindingAuthnRequest";
     public static final String POST_BINDING_LOGOUT = "postBindingLogout";
     public static final String POST_BINDING_RESPONSE = "postBindingResponse";
+    public static final String ARTIFACT_BINDING_RESPONSE = "artifactBindingResponse";
     public static final String SIGNATURE_ALGORITHM = "signatureAlgorithm";
+    public static final String ENCRYPTION_ALGORITHM = "encryptionAlgorithm";
     public static final String SIGNING_CERTIFICATE_KEY = "signingCertificate";
     public static final String SINGLE_LOGOUT_SERVICE_URL = "singleLogoutServiceUrl";
     public static final String SINGLE_SIGN_ON_SERVICE_URL = "singleSignOnServiceUrl";
+    public static final String ARTIFACT_RESOLUTION_SERVICE_URL = "artifactResolutionServiceUrl";
     public static final String VALIDATE_SIGNATURE = "validateSignature";
     public static final String PRINCIPAL_TYPE = "principalType";
     public static final String PRINCIPAL_ATTRIBUTE = "principalAttribute";
@@ -63,6 +66,8 @@ public class SAMLIdentityProviderConfig extends IdentityProviderModel {
     public static final String ALLOW_CREATE = "allowCreate";
     public static final String ATTRIBUTE_CONSUMING_SERVICE_INDEX = "attributeConsumingServiceIndex";
     public static final String ATTRIBUTE_CONSUMING_SERVICE_NAME = "attributeConsumingServiceName";
+    public static final String USE_METADATA_DESCRIPTOR_URL = "useMetadataDescriptorUrl";
+    public static final String DESCRIPTOR_CACHE_SECONDS = "descriptorCacheSeconds";
 
     public SAMLIdentityProviderConfig() {
     }
@@ -93,6 +98,14 @@ public class SAMLIdentityProviderConfig extends IdentityProviderModel {
 
     public void setSingleSignOnServiceUrl(String singleSignOnServiceUrl) {
         getConfig().put(SINGLE_SIGN_ON_SERVICE_URL, singleSignOnServiceUrl);
+    }
+
+    public String getArtifactResolutionServiceUrl() {
+        return getConfig().get(ARTIFACT_RESOLUTION_SERVICE_URL);
+    }
+
+    public void setArtifactResolutionServiceUrl(String artifactResolutionServiceUrl) {
+        getConfig().put(ARTIFACT_RESOLUTION_SERVICE_URL, artifactResolutionServiceUrl);
     }
 
     public String getSingleLogoutServiceUrl() {
@@ -204,6 +217,14 @@ public class SAMLIdentityProviderConfig extends IdentityProviderModel {
         getConfig().put(SIGNATURE_ALGORITHM, signatureAlgorithm);
     }
 
+    public String getEncryptionAlgorithm() {
+        return getConfig().get(ENCRYPTION_ALGORITHM);
+    }
+
+    public void setEncryptionAlgorithm(String encryptionAlgorithm) {
+        getConfig().put(ENCRYPTION_ALGORITHM, encryptionAlgorithm);
+    }
+
     public String getEncryptionPublicKey() {
         return getConfig().get(ENCRYPTION_PUBLIC_KEY);
     }
@@ -231,7 +252,7 @@ public class SAMLIdentityProviderConfig extends IdentityProviderModel {
     public boolean isPostBindingLogout() {
         String postBindingLogout = getConfig().get(POST_BINDING_LOGOUT);
         if (postBindingLogout == null) {
-            // To maintain unchanged behavior when adding this field, we set the inital value to equal that
+            // To maintain unchanged behavior when adding this field, we set the initial value to equal that
             // of the binding for the response:
             return isPostBindingResponse();
         }
@@ -248,6 +269,14 @@ public class SAMLIdentityProviderConfig extends IdentityProviderModel {
 
     public void setBackchannelSupported(boolean backchannel) {
         getConfig().put(BACKCHANNEL_SUPPORTED, String.valueOf(backchannel));
+    }
+
+    public boolean isArtifactBindingResponse() {
+        return Boolean.valueOf(getConfig().get(ARTIFACT_BINDING_RESPONSE));
+    }
+
+    public void setArtifactBindingResponse(boolean backchannel) {
+        getConfig().put(ARTIFACT_BINDING_RESPONSE, String.valueOf(backchannel));
     }
 
     /**
@@ -347,7 +376,7 @@ public class SAMLIdentityProviderConfig extends IdentityProviderModel {
     public void setSignSpMetadata(boolean signSpMetadata) {
         getConfig().put(SIGN_SP_METADATA, String.valueOf(signSpMetadata));
     }
-    
+
     public boolean isAllowCreate() {
         return Boolean.valueOf(getConfig().get(ALLOW_CREATE));
     }
@@ -388,15 +417,61 @@ public class SAMLIdentityProviderConfig extends IdentityProviderModel {
         return getConfig().get(ATTRIBUTE_CONSUMING_SERVICE_NAME);
     }
 
+    public void setUseMetadataDescriptorUrl(Boolean useDescriptorUrl) {
+        if (useDescriptorUrl == null || !useDescriptorUrl) {
+            getConfig().remove(USE_METADATA_DESCRIPTOR_URL);
+        } else {
+            getConfig().put(USE_METADATA_DESCRIPTOR_URL, Boolean.TRUE.toString());
+        }
+    }
+
+    public boolean isUseMetadataDescriptorUrl() {
+        return Boolean.parseBoolean(getConfig().get(USE_METADATA_DESCRIPTOR_URL));
+    }
+
+    public Long getDescriptorCacheSeconds() {
+        String descriptorCacheSeconds = getConfig().get(DESCRIPTOR_CACHE_SECONDS);
+        if (descriptorCacheSeconds != null && !descriptorCacheSeconds.isEmpty()) {
+            try {
+                Long descriptorCacheSecondsLong = Long.valueOf(descriptorCacheSeconds);
+                if (descriptorCacheSecondsLong > 0) {
+                    return descriptorCacheSecondsLong;
+                }
+            } catch (NumberFormatException e) {
+                // ignore it and use null
+            }
+        }
+        return null;
+    }
+
+    public void setDescriptorCacheSeconds(Long descriptorCacheSeconds) {
+        if (descriptorCacheSeconds == null || descriptorCacheSeconds <= 0) {
+            getConfig().remove(DESCRIPTOR_CACHE_SECONDS);
+        } else {
+            getConfig().put(DESCRIPTOR_CACHE_SECONDS, String.valueOf(descriptorCacheSeconds));
+        }
+    }
+
     @Override
     public void validate(RealmModel realm) {
         SslRequired sslRequired = realm.getSslRequired();
 
         checkUrl(sslRequired, getSingleLogoutServiceUrl(), SINGLE_LOGOUT_SERVICE_URL);
         checkUrl(sslRequired, getSingleSignOnServiceUrl(), SINGLE_SIGN_ON_SERVICE_URL);
+        if (StringUtil.isNotBlank(getMetadataDescriptorUrl())) {
+            checkUrl(sslRequired, getMetadataDescriptorUrl(), METADATA_DESCRIPTOR_URL);
+        }
+        if (isUseMetadataDescriptorUrl()) {
+            if (StringUtil.isBlank(getMetadataDescriptorUrl())) {
+                throw new IllegalArgumentException(USE_METADATA_DESCRIPTOR_URL + " needs a non-empty URL for " + METADATA_DESCRIPTOR_URL);
+            }
+        }
+        if (StringUtil.isNotBlank(getArtifactResolutionServiceUrl())) {
+            checkUrl(sslRequired, getArtifactResolutionServiceUrl(), ARTIFACT_RESOLUTION_SERVICE_URL);
+        }
         //transient name id format is not accepted together with principaltype SubjectnameId
         if (JBossSAMLURIConstants.NAMEID_FORMAT_TRANSIENT.get().equals(getNameIDPolicyFormat()) && SamlPrincipalType.SUBJECT == getPrincipalType())
             throw new IllegalArgumentException("Can not have Transient NameID Policy Format together with SUBJECT Principal Type");
-        
+
     }
 }

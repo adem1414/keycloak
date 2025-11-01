@@ -18,11 +18,11 @@ package org.keycloak.testsuite.authz;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertThat;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -56,7 +56,6 @@ import org.keycloak.representations.idm.authorization.ResourcePermissionRepresen
 import org.keycloak.representations.idm.authorization.ResourceRepresentation;
 import org.keycloak.representations.idm.authorization.ScopePermissionRepresentation;
 import org.keycloak.testsuite.util.ClientBuilder;
-import org.keycloak.testsuite.util.OAuthClient;
 import org.keycloak.testsuite.util.RealmBuilder;
 import org.keycloak.testsuite.util.RoleBuilder;
 import org.keycloak.testsuite.util.RolesBuilder;
@@ -165,7 +164,7 @@ public class PermissionClaimTest extends AbstractAuthzTest {
 
         request.setResourceId(resource.getName());
 
-        String accessToken = new OAuthClient().realm("authz-test").clientId("test-client").doGrantAccessTokenRequest("secret", "marta", "password").getAccessToken();
+        String accessToken = oauth.realm("authz-test").client("test-client", "secret").doPasswordGrantRequest("marta", "password").getAccessToken();
         AuthzClient authzClient = getAuthzClient();
         String ticket = authzClient.protection().permission().create(request).getTicket();
         AuthorizationResponse response = authzClient.authorization(accessToken).authorize(new AuthorizationRequest(ticket));
@@ -201,7 +200,7 @@ public class PermissionClaimTest extends AbstractAuthzTest {
 
         request.setResourceId(resource.getName());
 
-        String accessToken = new OAuthClient().realm("authz-test").clientId("test-client").doGrantAccessTokenRequest("secret", "marta", "password").getAccessToken();
+        String accessToken = oauth.realm("authz-test").client("test-client", "secret").doPasswordGrantRequest("marta", "password").getAccessToken();
         AuthzClient authzClient = getAuthzClient();
         String ticket = authzClient.protection().permission().forResource(request).getTicket();
         AuthorizationResponse response = authzClient.authorization(accessToken).authorize(new AuthorizationRequest(ticket));

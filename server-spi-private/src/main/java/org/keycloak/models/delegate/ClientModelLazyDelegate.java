@@ -23,6 +23,7 @@ import org.keycloak.models.ModelIllegalStateException;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RoleModel;
+
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -590,26 +591,6 @@ public class ClientModelLazyDelegate implements ClientModel {
     }
 
     @Override
-    public Stream<String> getDefaultRolesStream() {
-        return getDelegate().getDefaultRolesStream();
-    }
-
-    @Override
-    public void addDefaultRole(String name) {
-        getDelegate().addDefaultRole(name);
-    }
-
-    @Override
-    public void updateDefaultRoles(String... defaultRoles) {
-        getDelegate().updateDefaultRoles(defaultRoles);
-    }
-
-    @Override
-    public void removeDefaultRoles(String... defaultRoles) {
-        getDelegate().removeDefaultRoles(defaultRoles);
-    }
-
-    @Override
     public Stream<ProtocolMapperModel> getProtocolMappersStream() {
         return getDelegate().getProtocolMappersStream();
     }
@@ -632,6 +613,11 @@ public class ClientModelLazyDelegate implements ClientModel {
     @Override
     public ProtocolMapperModel getProtocolMapperById(String id) {
         return getDelegate().getProtocolMapperById(id);
+    }
+
+    @Override
+    public List<ProtocolMapperModel> getProtocolMapperByType(String type) {
+        return getDelegate().getProtocolMapperByType(type);
     }
 
     @Override

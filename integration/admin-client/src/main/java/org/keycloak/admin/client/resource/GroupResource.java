@@ -22,16 +22,16 @@ import org.keycloak.representations.idm.ManagementPermissionReference;
 import org.keycloak.representations.idm.ManagementPermissionRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.util.List;
 
 /**
@@ -85,6 +85,88 @@ public interface GroupResource {
     @DELETE
     void remove();
 
+    /**
+     * Get the paginated list of subgroups belonging to this group.
+     *
+     * @param first the position of the first result to be returned.
+     * @param max the maximum number of results that are to be returned.
+     * @param briefRepresentation if {@code true}, each returned subgroup representation will only contain basic information
+     *                           (id, name, path, and parentId). If {@code false}, the complete representations of the subgroups
+     *                            are returned (include role mappings and attributes).
+     */
+    @GET
+    @Path("children")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
+    List<GroupRepresentation> getSubGroups(@QueryParam("first") Integer first, @QueryParam("max") Integer max, @QueryParam("briefRepresentation") Boolean briefRepresentation);
+
+    /**
+     * Get the paginated list of subgroups belonging to this group.
+     *
+     * @param first the position of the first result to be returned.
+     * @param max the maximum number of results that are to be returned.
+     * @param briefRepresentation if {@code true}, each returned subgroup representation will only contain basic information
+     *                           (id, name, path, and parentId). If {@code false}, the complete representations of the subgroups
+     *                            are returned (include role mappings and attributes).
+     * @param subGroupsCount if {@code true}, the count of subgroups is returned for each subgroup. Defaults to true. Parameter supported since Keycloak 26.3. For older versions, it is always true.
+     */
+    @GET
+    @Path("children")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
+    List<GroupRepresentation> getSubGroups(@QueryParam("first") Integer first, @QueryParam("max") Integer max,
+                                           @QueryParam("briefRepresentation") Boolean briefRepresentation,
+                                           @QueryParam("subGroupsCount") Boolean subGroupsCount);
+
+    /**
+     * Get the paginated list of subgroups belonging to this group, filtered according to the specified parameters.
+     *
+     * @param search a {@code String} representing either an exact group name or a partial name. If empty or {@code null}
+     *              then all subgroups of this group are returned. Parameter available since Keycloak server 25. Will be ignored on older Keycloak versions with the default value null.
+     * @param exact if {@code true}, the subgroups will be searched using exact match for the {@code search} param. If false
+     *              or {@code null}, the method returns all subgroups that partially match the specified name. Parameter available since Keycloak server 25. Will be ignored on older Keycloak versions with the default value null.
+     * @param first the position of the first result to be returned.
+     * @param max the maximum number of results that are to be returned.
+     * @param briefRepresentation if {@code true}, each returned subgroup representation will only contain basic information
+     *                           (id, name, path, and parentId). If {@code false}, the complete representations of the subgroups
+     *                            are returned (including role mappings and attributes).
+     */
+    @GET
+    @Path("children")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
+    List<GroupRepresentation> getSubGroups(
+            @QueryParam("search") String search,
+            @QueryParam("exact") Boolean exact,
+            @QueryParam("first") Integer first,
+            @QueryParam("max") Integer max,
+            @QueryParam("briefRepresentation") Boolean briefRepresentation);
+
+    /**
+     * Get the paginated list of subgroups belonging to this group, filtered according to the specified parameters.
+     *
+     * @param search a {@code String} representing either an exact group name or a partial name. If empty or {@code null}
+     *              then all subgroups of this group are returned. Parameter available since Keycloak server 25. Will be ignored on older Keycloak versions with the default value null.
+     * @param exact if {@code true}, the subgroups will be searched using exact match for the {@code search} param. If false
+     *              or {@code null}, the method returns all subgroups that partially match the specified name. Parameter available since Keycloak server 25. Will be ignored on older Keycloak versions with the default value null.
+     * @param first the position of the first result to be returned.
+     * @param max the maximum number of results that are to be returned.
+     * @param briefRepresentation if {@code true}, each returned subgroup representation will only contain basic information
+     *                           (id, name, path, and parentId). If {@code false}, the complete representations of the subgroups
+     *                            are returned (including role mappings and attributes).
+     * @param subGroupsCount if {@code true}, the count of subgroups is returned for each subgroup. Defaults to true. Parameter supported since Keycloak 26.3. For older versions, it is always true.
+     */
+    @GET
+    @Path("children")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
+    List<GroupRepresentation> getSubGroups(
+            @QueryParam("search") String search,
+            @QueryParam("exact") Boolean exact,
+            @QueryParam("first") Integer first,
+            @QueryParam("max") Integer max,
+            @QueryParam("briefRepresentation") Boolean briefRepresentation,
+            @QueryParam("subGroupsCount") Boolean subGroupsCount);
 
     /**
      * Set or create child.  This will just set the parent if it exists.  Create it and set the parent

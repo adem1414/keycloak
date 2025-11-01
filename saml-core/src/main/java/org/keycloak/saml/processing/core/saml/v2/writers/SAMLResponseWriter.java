@@ -39,7 +39,6 @@ import javax.xml.stream.XMLStreamWriter;
 import java.net.URI;
 import java.util.List;
 import org.keycloak.dom.saml.v2.protocol.ExtensionsType;
-import javax.xml.crypto.dsig.XMLSignature;
 
 import static org.keycloak.saml.common.constants.JBossSAMLURIConstants.PROTOCOL_NSURI;
 
@@ -213,6 +212,7 @@ public class SAMLResponseWriter extends BaseWriter {
         String statusMessage = status.getStatusMessage();
         if (StringUtil.isNotNull(statusMessage)) {
             StaxUtil.writeStartElement(writer, PROTOCOL_PREFIX, JBossSAMLConstants.STATUS_MESSAGE.get(), JBossSAMLURIConstants.PROTOCOL_NSURI.get());
+            StaxUtil.writeCharacters(writer, statusMessage);
             StaxUtil.writeEndElement(writer);
         }
 

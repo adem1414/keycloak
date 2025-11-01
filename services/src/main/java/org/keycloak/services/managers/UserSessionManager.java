@@ -17,7 +17,9 @@
 package org.keycloak.services.managers;
 
 import org.jboss.logging.Logger;
+import org.keycloak.authentication.AuthenticationProcessor;
 import org.keycloak.common.util.Time;
+import org.keycloak.device.DeviceActivityManager;
 import org.keycloak.models.AuthenticatedClientSessionModel;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.ClientSessionContext;
@@ -65,7 +67,8 @@ public class UserSessionManager {
         // Create and persist clientSession
         AuthenticatedClientSessionModel offlineClientSession = offlineUserSession.getAuthenticatedClientSessionByClient(clientSession.getClient().getId());
         if (offlineClientSession == null) {
-            createOfflineClientSession(user, clientSession, offlineUserSession);
+            offlineClientSession = createOfflineClientSession(user, clientSession, offlineUserSession);
+            offlineClientSession.removeNote(AuthenticationProcessor.FIRST_OFFLINE_ACCESS);
         }
     }
 
@@ -96,20 +99,28 @@ public class UserSessionManager {
         AtomicBoolean anyRemoved = new AtomicBoolean(false);
         kcSession.sessions().getOfflineUserSessionsStream(realm, user).collect(Collectors.toList())
                 .forEach(userSession -> {
-                    AuthenticatedClientSessionModel clientSession = userSession.getAuthenticatedClientSessionByClient(client.getId());
-                    if (clientSession != null) {
-                        if (logger.isTraceEnabled()) {
-                            logger.tracef("Removing existing offline token for user '%s' and client '%s' .",
-                                    user.getUsername(), client.getClientId());
-                        }
-
-                        clientSession.detachFromUserSession();
-                        checkOfflineUserSessionHasClientSessions(realm, user, userSession);
+                    if (removeClientFromOfflineUserSession(realm, userSession, client, user)) {
                         anyRemoved.set(true);
                     }
                 });
 
         return anyRemoved.get();
+    }
+
+    public boolean removeClientFromOfflineUserSession(RealmModel realm, UserSessionModel userSession, ClientModel client, UserModel user) {
+        AuthenticatedClientSessionModel clientSession = userSession.getAuthenticatedClientSessionByClient(client.getId());
+        if (clientSession != null) {
+            if (logger.isTraceEnabled()) {
+                logger.tracef("Removing existing offline token for user '%s' and client '%s' .",
+                        user.getUsername(), client.getClientId());
+            }
+
+            clientSession.detachFromUserSession();
+            checkOfflineUserSessionHasClientSessions(realm, user, userSession);
+            return true;
+        } else {
+            return false;
+        }
     }
 
     public void revokeOfflineUserSession(UserSessionModel userSession) {
@@ -139,13 +150,13 @@ public class UserSessionManager {
         return offlineUserSession;
     }
 
-    private void createOfflineClientSession(UserModel user, AuthenticatedClientSessionModel clientSession, UserSessionModel offlineUserSession) {
+    private AuthenticatedClientSessionModel createOfflineClientSession(UserModel user, AuthenticatedClientSessionModel clientSession, UserSessionModel offlineUserSession) {
         if (logger.isTraceEnabled()) {
             logger.tracef("Creating new offline token client session. ClientSessionId: '%s', UserSessionID: '%s' , Username: '%s', Client: '%s'" ,
                     clientSession.getId(), offlineUserSession.getId(), user.getUsername(), clientSession.getClient().getClientId());
         }
 
-        kcSession.sessions().createOfflineClientSession(clientSession, offlineUserSession);
+        return kcSession.sessions().createOfflineClientSession(clientSession, offlineUserSession);
     }
 
     // Check if userSession has any offline clientSessions attached to it. Remove userSession if not
@@ -159,5 +170,24 @@ public class UserSessionManager {
             logger.tracef("Removing offline userSession for user %s as it doesn't have any client sessions attached. UserSessionID: %s", user.getUsername(), userSession.getId());
         }
         kcSession.sessions().removeOfflineUserSession(realm, userSession);
+    }
+
+    public UserSessionModel createUserSession(RealmModel realm, UserModel user, String loginUsername, String ipAddress,
+                                              String authMethod, boolean rememberMe, String brokerSessionId, String brokerUserId) {
+        return createUserSession(null, realm, user, loginUsername, ipAddress, authMethod, rememberMe, brokerSessionId, brokerUserId, UserSessionModel.SessionPersistenceState.PERSISTENT);
+    }
+
+    public UserSessionModel createUserSession(String id, RealmModel realm, UserModel user, String loginUsername, String ipAddress,
+                                              String authMethod, boolean rememberMe, String brokerSessionId, String brokerUserId,
+                                              UserSessionModel.SessionPersistenceState persistenceState) {
+        // Create user session in store
+        UserSessionModel userSession = kcSession.sessions().createUserSession(id, realm, user, loginUsername, ipAddress, authMethod, rememberMe, brokerSessionId, brokerUserId, persistenceState);
+
+        // Attach device info into user session notes
+        if (userSession != null) {
+            DeviceActivityManager.attachDevice(userSession, kcSession);
+        }
+
+        return userSession;
     }
 }

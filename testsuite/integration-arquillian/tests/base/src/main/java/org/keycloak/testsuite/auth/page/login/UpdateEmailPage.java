@@ -20,11 +20,12 @@ import static org.keycloak.testsuite.util.UIUtils.clickLink;
 import static org.keycloak.testsuite.util.UIUtils.getTextFromElement;
 
 import org.keycloak.models.UserModel;
+import org.keycloak.testsuite.pages.LogoutSessionsPage;
 import org.openqa.selenium.NoSuchElementException;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
 
-public class UpdateEmailPage extends RequiredActions {
+public class UpdateEmailPage extends LogoutSessionsPage {
 
     @FindBy(id = "email")
     private WebElement emailInput;
@@ -32,28 +33,26 @@ public class UpdateEmailPage extends RequiredActions {
     @FindBy(id = "input-error-email")
     private WebElement inputErrorEmail;
 
-    @FindBy(css = "button[name='cancel-aia']")
+    @FindBy(id = "kc-cancel")
     private WebElement cancelActionButton;
 
-    @FindBy(css = "input[type='submit']")
-    private WebElement submitActionButton;
+    @FindBy(id = "kc-submit")
+    private WebElement submitButton;
 
-    @Override
-    public String getActionId() {
-        return UserModel.RequiredAction.UPDATE_EMAIL.name();
-    }
+    @FindBy(className = "kc-feedback-text")
+    private WebElement feedbackMessage;
 
     @Override
     public boolean isCurrent() {
         return driver.getCurrentUrl().contains("login-actions/required-action")
-                && driver.getCurrentUrl().contains("execution=" + getActionId());
+                && driver.getCurrentUrl().contains("execution=" + UserModel.RequiredAction.UPDATE_EMAIL.name());
     }
 
     public void changeEmail(String email){
         emailInput.clear();
         emailInput.sendKeys(email);
 
-        submit();
+        clickLink(submitButton);
     }
 
     public String getEmail() {
@@ -81,7 +80,15 @@ public class UpdateEmailPage extends RequiredActions {
     }
 
     public void clickSubmitAction() {
-        clickLink(submitActionButton);
+        clickLink(submitButton);
+    }
+
+    public String getInfo() {
+        try {
+            return getTextFromElement(feedbackMessage);
+        } catch (NoSuchElementException e) {
+            return null;
+        }
     }
 
 }

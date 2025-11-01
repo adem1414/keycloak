@@ -18,13 +18,10 @@
 package org.keycloak.testsuite.federation.ldap;
 
 import org.junit.Assert;
-import org.junit.Assume;
-import org.junit.Before;
 import org.junit.ClassRule;
 import org.junit.FixMethodOrder;
 import org.junit.Test;
 import org.junit.runners.MethodSorters;
-import org.keycloak.common.Profile;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.LDAPConstants;
 import org.keycloak.models.RealmModel;
@@ -36,11 +33,10 @@ import org.keycloak.storage.UserStoragePrivateUtil;
 import org.keycloak.storage.UserStorageUtil;
 import org.keycloak.storage.ldap.LDAPStorageProvider;
 import org.keycloak.storage.ldap.idm.model.LDAPObject;
-import org.keycloak.testsuite.ProfileAssume;
 import org.keycloak.testsuite.util.LDAPRule;
 import org.keycloak.testsuite.util.LDAPTestConfiguration;
 import org.keycloak.testsuite.util.LDAPTestUtils;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -71,12 +67,6 @@ public class LDAPMultipleAttributesTest extends AbstractLDAPTest {
         return ldapRule;
     }
 
-    @Before
-    public void before() {
-        // don't run this test when map storage is enabled, as map storage doesn't support LDAP, yet
-        ProfileAssume.assumeFeatureDisabled(Profile.Feature.MAP_STORAGE);
-    }
-
     @Override
     protected void afterImportTestRealm() {
         testingClient.server().run(session -> {
@@ -105,8 +95,8 @@ public class LDAPMultipleAttributesTest extends AbstractLDAPTest {
             ldapClient.addRedirectUri("/ldap-portal");
             ldapClient.addRedirectUri("/ldap-portal/*");
             ldapClient.setManagementUrl("/ldap-portal");
-            ldapClient.addProtocolMapper(UserAttributeMapper.createClaimMapper("postalCode", "postal_code", "postal_code", "String", true, true, true));
-            ldapClient.addProtocolMapper(UserAttributeMapper.createClaimMapper("street", "street", "street", "String", true, true, false));
+            ldapClient.addProtocolMapper(UserAttributeMapper.createClaimMapper("postalCode", "postal_code", "postal_code", "String", true, true, true, true));
+            ldapClient.addProtocolMapper(UserAttributeMapper.createClaimMapper("street", "street", "street", "String", true, true, true, false));
             ldapClient.addScopeMapping(appRealm.getRole("user"));
             ldapClient.setSecret("password");
         });
@@ -115,7 +105,6 @@ public class LDAPMultipleAttributesTest extends AbstractLDAPTest {
 
     @Test
     public void testUserImport() {
-        Assume.assumeTrue("User cache disabled.", isUserCacheEnabled());
         testingClient.server().run(session -> {
             LDAPTestContext ctx = LDAPTestContext.init(session);
             UserStorageUtil.userCache(session).clear();
@@ -131,7 +120,6 @@ public class LDAPMultipleAttributesTest extends AbstractLDAPTest {
 
     @Test
     public void testModel() {
-        Assume.assumeTrue("User cache disabled.", isUserCacheEnabled());
         testingClient.server().run(session -> {
             LDAPTestContext ctx = LDAPTestContext.init(session);
             UserStorageUtil.userCache(session).clear();
@@ -195,14 +183,14 @@ public class LDAPMultipleAttributesTest extends AbstractLDAPTest {
     @Test
     public void ldapPortalEndToEndTest() {
         // Login as bwilson
-        oauth.clientId("ldap-portal");
+        oauth.client("ldap-portal", "password");
         oauth.redirectUri(suiteContext.getAuthServerInfo().getContextRoot().toString() + "/ldap-portal");
 
         loginPage.open();
         loginPage.login("bwilson", "Password1");
 
-        String code = new OAuthClient.AuthorizationEndpointResponse(oauth).getCode();
-        OAuthClient.AccessTokenResponse response = oauth.doAccessTokenRequest(code, "password");
+        String code = oauth.parseLoginResponse().getCode();
+        AccessTokenResponse response = oauth.doAccessTokenRequest(code);
 
         Assert.assertEquals(200, response.getStatusCode());
         IDToken idToken = oauth.verifyIDToken(response.getIdToken());
@@ -214,14 +202,14 @@ public class LDAPMultipleAttributesTest extends AbstractLDAPTest {
         Assert.assertTrue(postalCodes.contains("88441"));
         Assert.assertTrue(postalCodes.contains("77332"));
 
-        oauth.doLogout(response.getRefreshToken(), "password");
+        oauth.doLogout(response.getRefreshToken());
 
         // Login as jbrown
         loginPage.open();
         loginPage.login("jbrown", "Password1");
 
-        code = new OAuthClient.AuthorizationEndpointResponse(oauth).getCode();
-        response = oauth.doAccessTokenRequest(code, "password");
+        code = oauth.parseLoginResponse().getCode();
+        response = oauth.doAccessTokenRequest(code);
 
         org.keycloak.testsuite.Assert.assertEquals(200, response.getStatusCode());
         idToken = oauth.verifyIDToken(response.getIdToken());
@@ -233,9 +221,8 @@ public class LDAPMultipleAttributesTest extends AbstractLDAPTest {
         Assert.assertTrue(postalCodes.contains("88441"));
         Assert.assertFalse(postalCodes.contains("77332"));
 
-        oauth.doLogout(response.getRefreshToken(), "password");
+        oauth.doLogout(response.getRefreshToken());
     }
-
 
 
 }

@@ -1,22 +1,12 @@
 package org.keycloak.testsuite.cli;
 
+import org.keycloak.common.crypto.FipsMode;
+import org.keycloak.testsuite.arquillian.AuthServerTestEnricher;
 import org.keycloak.testsuite.cli.exec.AbstractExec;
 import org.keycloak.testsuite.cli.exec.AbstractExecBuilder;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FilterOutputStream;
-import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.InterruptedIOException;
-import java.io.OutputStream;
-import java.util.ArrayList;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 /**
  * @author <a href="mailto:mstrukel@redhat.com">Marko Strukelj</a>
@@ -48,6 +38,15 @@ public class KcRegExec extends AbstractExec {
         return newBuilder()
                 .argsLine(args)
                 .execute();
+    }
+
+    @Override
+    public List<String> stderrLines() {
+        List<String> lines = super.stderrLines();
+        // remove the two lines with the BC provider info if FIPS
+        return AuthServerTestEnricher.AUTH_SERVER_FIPS_MODE == FipsMode.DISABLED || lines.size() < 2
+            ? lines
+            : lines.subList(2, lines.size());
     }
 
     public static class Builder extends AbstractExecBuilder<KcRegExec> {

@@ -1,93 +1,112 @@
 package org.keycloak.it.cli.dist;
 
 import io.quarkus.test.junit.main.Launch;
-import io.quarkus.test.junit.main.LaunchResult;
-import org.hamcrest.CoreMatchers;
 import org.junit.jupiter.api.MethodOrderer;
-import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
+import org.keycloak.common.Profile;
 import org.keycloak.it.junit5.extension.CLIResult;
 import org.keycloak.it.junit5.extension.DistributionTest;
 import org.keycloak.it.junit5.extension.RawDistOnly;
+import org.keycloak.it.utils.KeycloakDistribution;
 import org.keycloak.quarkus.runtime.cli.command.Build;
 import org.keycloak.quarkus.runtime.cli.command.Start;
 import org.keycloak.quarkus.runtime.cli.command.StartDev;
 
+import java.util.Arrays;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.keycloak.quarkus.runtime.cli.command.AbstractStartCommand.OPTIMIZED_BUILD_OPTION_LONG;
+import static org.keycloak.quarkus.runtime.cli.command.AbstractAutoBuildCommand.OPTIMIZED_BUILD_OPTION_LONG;
 
 @DistributionTest
 @RawDistOnly(reason = "Containers are immutable")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@Tag(DistributionTest.SMOKE)
 public class FeaturesDistTest {
 
+    private static final String PREVIEW_FEATURES_EXPECTED_LOG = "Preview features enabled: " + Arrays.stream(Profile.Feature.values())
+            .filter(feature -> feature.getType() == Profile.Feature.Type.PREVIEW)
+            .filter(feature -> {
+                Set<Profile.Feature> versions = Profile.getFeatureVersions(feature.getUnversionedKey());
+                if (versions.size() == 1) {
+                    return true;
+                }
+                return versions.iterator().next().getVersion() == feature.getVersion();
+            })
+            .map(Profile.Feature::getVersionedKey)
+            .sorted()
+            .collect(Collectors.joining(", "));
+
     @Test
-    @Launch({ Build.NAME, "--features=preview", "--cache=local"})
-    @Order(1)
-    public void testEnableOnBuild(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    public void testEnableOnBuild(KeycloakDistribution dist) {
+        CLIResult cliResult = dist.run(Build.NAME, "--db=dev-file", "--features=preview");
         cliResult.assertBuild();
+        assertPreviewFeaturesEnabled(cliResult);
+
+        cliResult = dist.run(Start.NAME, "--http-enabled=true", "--hostname-strict=false", OPTIMIZED_BUILD_OPTION_LONG);
         assertPreviewFeaturesEnabled(cliResult);
     }
 
     @Test
-    @Launch({ Start.NAME, "--http-enabled=true", "--hostname-strict=false", OPTIMIZED_BUILD_OPTION_LONG})
-    @Order(2)
-    public void testFeatureEnabledOnStart(LaunchResult result) {
-        assertPreviewFeaturesEnabled((CLIResult) result);
+    @Launch({StartDev.NAME, "--features=preview"})
+    public void testEnablePreviewFeatures(CLIResult cliResult) {
+        cliResult.assertStartedDevMode();
+        assertPreviewFeaturesEnabled(cliResult);
     }
 
+    // Should enable "docker" together with all other "preview" features
     @Test
-    @Launch({StartDev.NAME, "--features=preview"})
-    public void testEnablePreviewFeatures(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    @Launch({StartDev.NAME, "--features=preview,docker"})
+    public void testEnablePreviewFeaturesAndDocker(CLIResult cliResult) {
         cliResult.assertStartedDevMode();
-        assertPreviewFeaturesEnabled((CLIResult) result);
+        assertPreviewFeaturesEnabled(cliResult);
     }
 
     @Test
     @Launch({StartDev.NAME, "--features=preview", "--features-disabled=token-exchange"})
-    public void testEnablePrecedenceOverDisable(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    public void testPreviewFeatureDisabledInPreviewMode(CLIResult cliResult) {
         cliResult.assertStartedDevMode();
-        assertPreviewFeaturesEnabled((CLIResult) result);
+        cliResult.assertNoMessage("token-exchange");
+    }
+
+    @Test
+    @Launch({StartDev.NAME, "--features=token-exchange", "--features-disabled=token-exchange"})
+    public void testEnableDisableConflict(CLIResult cliResult) {
+        cliResult.assertError("token-exchange is in both the enabled and disabled feature lists");
+    }
+
+    @Test
+    @Launch({StartDev.NAME, "--features=token-exchange:v1", "--features-disabled=token-exchange"})
+    public void testEnableDisableConflictUsingVersioned(CLIResult cliResult) {
+        cliResult.assertError("Versioned feature token-exchange:v1 is not expected as token-exchange is already disabled");
     }
 
     @Test
     @EnabledOnOs(value = { OS.LINUX, OS.MAC }, disabledReason = "different shell escaping behaviour on Windows.")
-    @Launch({StartDev.NAME, "--features=token-exchange,admin-fine-grained-authz"})
-    public void testEnableMultipleFeatures(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    @Launch({StartDev.NAME, "--features=token-exchange,admin-fine-grained-authz:v1"})
+    public void testEnableMultipleFeatures(CLIResult cliResult) {
         cliResult.assertStartedDevMode();
-        assertThat(cliResult.getOutput(), CoreMatchers.allOf(
-                containsString("Preview feature enabled: admin_fine_grained_authz"),
-                containsString("Preview feature enabled: token_exchange")));
-        assertFalse(cliResult.getOutput().contains("declarative-user-profile"));
+        cliResult.assertMessage("Preview features enabled: admin-fine-grained-authz:v1, token-exchange:v1");
+        cliResult.assertNoMessage("recovery-codes");
     }
 
     @Test
     @EnabledOnOs(value = { OS.WINDOWS }, disabledReason = "different shell escaping behaviour on Windows.")
-    @Launch({StartDev.NAME, "--features=\"token-exchange,admin-fine-grained-authz\""})
-    public void testWinEnableMultipleFeatures(LaunchResult result) {
-        CLIResult cliResult = (CLIResult) result;
+    @Launch({StartDev.NAME, "--features=\"token-exchange,admin-fine-grained-authz:v1\""})
+    public void testWinEnableMultipleFeatures(CLIResult cliResult) {
         cliResult.assertStartedDevMode();
-        assertThat(cliResult.getOutput(), CoreMatchers.allOf(
-                containsString("Preview feature enabled: admin_fine_grained_authz"),
-                containsString("Preview feature enabled: token_exchange")));
-        assertFalse(cliResult.getOutput().contains("declarative-user-profile"));
+        cliResult.assertMessage("Preview features enabled: admin-fine-grained-authz:v1, token-exchange:v1");
+        cliResult.assertNoMessage("recovery-codes");
     }
 
-    private void assertPreviewFeaturesEnabled(CLIResult result) {
-        assertThat(result.getOutput(), CoreMatchers.allOf(
-                containsString("Preview feature enabled: admin_fine_grained_authz"),
-                containsString("Preview feature enabled: openshift_integration"),
-                containsString("Preview feature enabled: scripts"),
-                containsString("Preview feature enabled: token_exchange"),
-                containsString("Preview feature enabled: declarative_user_profile")));
+    private void assertPreviewFeaturesEnabled(CLIResult cliResult) {
+        assertThat("expecting at least one preview feature on the list", PREVIEW_FEATURES_EXPECTED_LOG, containsString(":"));
+        cliResult.assertMessage(PREVIEW_FEATURES_EXPECTED_LOG);
     }
 }

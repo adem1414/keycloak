@@ -31,6 +31,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import org.keycloak.models.RoleModel;
+import org.keycloak.utils.KeycloakSessionUtil;
 
 /**
  * Stateful per-request object
@@ -39,14 +40,12 @@ import org.keycloak.models.RoleModel;
  */
 public abstract class AbstractLDAPStorageMapper implements LDAPStorageMapper {
 
-    protected final KeycloakSession session;
     protected final ComponentModel mapperModel;
     protected final LDAPStorageProvider ldapProvider;
 
     public AbstractLDAPStorageMapper(ComponentModel mapperModel, LDAPStorageProvider ldapProvider) {
         this.mapperModel = mapperModel;
         this.ldapProvider = ldapProvider;
-        this.session = ldapProvider.getSession();
     }
 
     @Override
@@ -79,6 +78,11 @@ public abstract class AbstractLDAPStorageMapper implements LDAPStorageMapper {
         return null;
     }
 
+    @Override
+    public Set<String> getUserAttributes() {
+        return Collections.emptySet();
+    }
+
     public static boolean parseBooleanParameter(ComponentModel mapperModel, String paramName) {
         String paramm = mapperModel.getConfig().getFirst(paramName);
         return Boolean.parseBoolean(paramm);
@@ -94,4 +98,7 @@ public abstract class AbstractLDAPStorageMapper implements LDAPStorageMapper {
 
     }
 
+    protected KeycloakSession getSession() {
+        return KeycloakSessionUtil.getKeycloakSession();
+    }
 }

@@ -30,6 +30,7 @@ import org.keycloak.representations.idm.ClientPolicyConditionConfigurationRepres
 import org.keycloak.services.clientpolicy.ClientPolicyContext;
 import org.keycloak.services.clientpolicy.ClientPolicyException;
 import org.keycloak.services.clientpolicy.ClientPolicyVote;
+import org.keycloak.services.clientpolicy.context.PreAuthorizationRequestContext;
 
 /**
  * @author <a href="mailto:takashi.norimatsu.ws@hitachi.com">Takashi Norimatsu</a>
@@ -68,6 +69,11 @@ public class ClientRolesCondition extends AbstractClientPolicyConditionProvider<
     @Override
     public ClientPolicyVote applyPolicy(ClientPolicyContext context) throws ClientPolicyException {
         switch (context.getEvent()) {
+            case PRE_AUTHORIZATION_REQUEST:
+                PreAuthorizationRequestContext paContext = (PreAuthorizationRequestContext) context;
+                ClientModel client = session.getContext().getRealm().getClientByClientId(paContext.getClientId());
+                if (isRolesMatched(client)) return ClientPolicyVote.YES;
+                return ClientPolicyVote.NO;
             case AUTHORIZATION_REQUEST:
             case TOKEN_REQUEST:
             case TOKEN_RESPONSE:
@@ -84,7 +90,10 @@ public class ClientRolesCondition extends AbstractClientPolicyConditionProvider<
             case BACKCHANNEL_TOKEN_RESPONSE:
             case PUSHED_AUTHORIZATION_REQUEST:
             case REGISTERED:
+            case UPDATE:
             case UPDATED:
+            case SAML_AUTHN_REQUEST:
+            case SAML_LOGOUT_REQUEST:
                 if (isRolesMatched(session.getContext().getClient())) return ClientPolicyVote.YES;
                 return ClientPolicyVote.NO;
             default:

@@ -1,22 +1,26 @@
 package org.keycloak.testsuite.util;
 
-import java.security.KeyStore;
-import java.security.KeyStoreException;
-import java.security.MessageDigest;
-import java.security.cert.CertificateEncodingException;
-import java.security.cert.X509Certificate;
-import java.util.Enumeration;
-
-import javax.ws.rs.client.Client;
-import javax.ws.rs.client.ClientBuilder;
-import javax.ws.rs.client.WebTarget;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.Response;
-
+import org.apache.http.client.RedirectStrategy;
+import org.apache.http.conn.ssl.NoopHostnameVerifier;
+import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
 import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.DefaultRedirectStrategy;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.keycloak.common.util.Base64Url;
 import org.keycloak.common.util.KeystoreUtil;
+
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
+import java.security.KeyManagementException;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.UnrecoverableKeyException;
+import java.security.cert.CertificateEncodingException;
+import java.security.cert.X509Certificate;
+import java.util.Enumeration;
 
 /**
  * Utilities for Holder of key mechanism and other Mutual TLS tests.
@@ -28,6 +32,9 @@ public class MutualTLSUtils {
 
     public static final String DEFAULT_KEYSTOREPATH = System.getProperty("client.certificate.keystore");
     public static final String DEFAULT_KEYSTOREPASSWORD = System.getProperty("client.certificate.keystore.passphrase");
+
+    // Subject DN of the 1st certificate corresponding to private-key in DEFAULT_KEYSTOREPATH keystore
+    public static final String DEFAULT_KEYSTORE_SUBJECT_DN = "EMAILADDRESS=test-user@localhost, CN=test-user@localhost, OU=Keycloak, O=Red Hat, L=Westford, ST=MA, C=US";
     public static final String DEFAULT_TRUSTSTOREPATH = System.getProperty("client.truststore");
     public static final String DEFAULT_TRUSTSTOREPASSWORD = System.getProperty("client.truststore.passphrase");
 
@@ -50,12 +57,16 @@ public class MutualTLSUtils {
     public static CloseableHttpClient newCloseableHttpClientWithOBBKeyStoreAndTrustStore() {
         return newCloseableHttpClient(OBB_KEYSTOREPATH, OBB_KEYSTOREPASSWORD, DEFAULT_TRUSTSTOREPATH, DEFAULT_TRUSTSTOREPASSWORD);
     }
-    
+
     public static CloseableHttpClient newCloseableHttpClientWithoutKeyStoreAndTrustStore() {
         return newCloseableHttpClient(null, null, null, null);
     }
 
     public static CloseableHttpClient newCloseableHttpClient(String keyStorePath, String keyStorePassword, String trustStorePath, String trustStorePassword) {
+        return newCloseableHttpClient(keyStorePath, keyStorePassword, trustStorePath, trustStorePassword, DefaultRedirectStrategy.INSTANCE);
+    }
+
+    public static CloseableHttpClient newCloseableHttpClient(String keyStorePath, String keyStorePassword, String trustStorePath, String trustStorePassword, RedirectStrategy redirectStrategy) {
 
         KeyStore keystore = null;
         // Load the keystore file
@@ -63,28 +74,41 @@ public class MutualTLSUtils {
             try {
                 keystore = KeystoreUtil.loadKeyStore(keyStorePath, keyStorePassword);
             } catch (Exception e) {
-                e.printStackTrace();
+                throw new RuntimeException(e);
             }
         }
 
-        // load the trustore
+        // load the truststore
         KeyStore truststore = null;
         if (trustStorePath != null) {
             try {
                 truststore = KeystoreUtil.loadKeyStore(trustStorePath, trustStorePassword);
             } catch(Exception e) {
-                e.printStackTrace();
+                throw new RuntimeException(e);
             }
         }
 
-        if (keystore != null || truststore != null)
-            return (CloseableHttpClient) new org.keycloak.adapters.HttpClientBuilder()
-                    .keyStore(keystore, keyStorePassword)
-                    .trustStore(truststore)
-                    .hostnameVerification(org.keycloak.adapters.HttpClientBuilder.HostnameVerificationPolicy.ANY)
-                    .build();
+        if (keystore != null || truststore != null) {
+            return newCloseableHttpClientSSL(keystore, keyStorePassword, truststore, redirectStrategy);
+        }
 
-        return HttpClientBuilder.create().build();
+        return HttpClientBuilder.create().setRedirectStrategy(redirectStrategy).build();
+    }
+
+    public static CloseableHttpClient newCloseableHttpClientSSL(KeyStore keystore, String keyStorePassword, KeyStore truststore, RedirectStrategy redirectStrategy) {
+        try {
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            KeyManagerFactory kmfactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            kmfactory.init(keystore, keyStorePassword.toCharArray());
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            tmf.init(truststore);
+            sslContext.init(kmfactory.getKeyManagers(), tmf.getTrustManagers(), null);
+            SSLConnectionSocketFactory sf = new SSLConnectionSocketFactory(sslContext, NoopHostnameVerifier.INSTANCE);
+
+            return HttpClientBuilder.create().setSSLSocketFactory(sf).setRedirectStrategy(redirectStrategy).build();
+        } catch (NoSuchAlgorithmException|KeyStoreException|KeyManagementException|UnrecoverableKeyException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public static String getThumbprintFromDefaultClientCert() throws KeyStoreException, CertificateEncodingException {
@@ -122,30 +146,4 @@ public class MutualTLSUtils {
         return DERX509Base64UrlEncoded;
     }
 
-    public static Response executeUserInfoRequestInGetMethod(String accessToken, boolean isKeystoreUsed, String keystorePath, String keystorePassward) {
-        ClientBuilder clientBuilder = ClientBuilder.newBuilder();
-        KeyStore keystore = null;
-        // Load the keystore file
-        if(isKeystoreUsed) {
-            try {
-                if (keystorePath != null) {
-                    keystore = KeystoreUtil.loadKeyStore(keystorePath, keystorePassward);
-                    clientBuilder.keyStore(keystore, keystorePassward);
-                } else {
-                    keystore = KeystoreUtil.loadKeyStore(DEFAULT_KEYSTOREPATH, DEFAULT_KEYSTOREPASSWORD);
-                    clientBuilder.keyStore(keystore, DEFAULT_KEYSTOREPASSWORD);
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-        Client client = clientBuilder.build();
-        WebTarget userInfoTarget = null;
-        try {
-            userInfoTarget = UserInfoClientUtil.getUserInfoWebTarget(client);
-        } finally {
-            client.close();
-        }
-        return userInfoTarget.request().header(HttpHeaders.AUTHORIZATION, "bearer " + accessToken).get();
-    }
 }

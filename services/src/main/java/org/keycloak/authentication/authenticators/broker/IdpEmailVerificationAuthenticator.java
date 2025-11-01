@@ -20,8 +20,10 @@ package org.keycloak.authentication.authenticators.broker;
 import org.jboss.logging.Logger;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
+import org.keycloak.authentication.AuthenticationProcessor;
 import org.keycloak.authentication.actiontoken.idpverifyemail.IdpVerifyAccountLinkActionToken;
 import org.keycloak.authentication.authenticators.broker.util.SerializedBrokeredIdentityContext;
+import org.keycloak.broker.provider.AbstractIdentityProvider;
 import org.keycloak.broker.provider.BrokeredIdentityContext;
 import org.keycloak.common.util.Time;
 import org.keycloak.email.EmailException;
@@ -43,10 +45,10 @@ import org.keycloak.sessions.AuthenticationSessionModel;
 
 import java.net.URI;
 import java.util.Objects;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriBuilder;
 import java.util.concurrent.TimeUnit;
-import javax.ws.rs.core.*;
+import jakarta.ws.rs.core.*;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -65,6 +67,13 @@ public class IdpEmailVerificationAuthenticator extends AbstractIdpAuthenticator 
 
         if (realm.getSmtpConfig().isEmpty()) {
             ServicesLogger.LOGGER.smtpNotConfigured();
+            context.attempted();
+            return;
+        }
+
+        if (Boolean.parseBoolean(context.getAuthenticationSession().getAuthNote(AbstractIdentityProvider.UPDATE_PROFILE_USERNAME_CHANGED))
+                || Boolean.parseBoolean(context.getAuthenticationSession().getAuthNote(AbstractIdentityProvider.UPDATE_PROFILE_EMAIL_CHANGED))) {
+            logger.debug("Email or username changed on review. Ignoring email verification authenticator.");
             context.attempted();
             return;
         }
@@ -133,7 +142,7 @@ public class IdpEmailVerificationAuthenticator extends AbstractIdpAuthenticator 
           brokerContext.getUsername(), brokerContext.getIdpConfig().getAlias(), authSession.getClient().getClientId()
         );
         UriBuilder builder = Urls.actionTokenBuilder(uriInfo.getBaseUri(), token.serialize(session, realm, uriInfo),
-                authSession.getClient().getClientId(), authSession.getTabId());
+                authSession.getClient().getClientId(), authSession.getTabId(), AuthenticationProcessor.getClientData(session, authSession));
         String link = builder
                 .queryParam(Constants.EXECUTION, context.getExecution().getId())
                 .build(realm.getName()).toString();
@@ -146,6 +155,8 @@ public class IdpEmailVerificationAuthenticator extends AbstractIdpAuthenticator 
                     .setUser(existingUser)
                     .setAttribute(EmailTemplateProvider.IDENTITY_PROVIDER_BROKER_CONTEXT, brokerContext)
                     .sendConfirmIdentityBrokerLink(link, expirationInMinutes);
+
+            authSession.addRequiredAction(UserModel.RequiredAction.VERIFY_EMAIL);
 
             event.success();
         } catch (EmailException e) {

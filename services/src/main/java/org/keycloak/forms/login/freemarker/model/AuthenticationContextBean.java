@@ -25,6 +25,7 @@ import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationSelectionOption;
 import org.keycloak.authentication.authenticators.browser.AbstractUsernameFormAuthenticator;
 import org.keycloak.forms.login.LoginFormsPages;
+import org.keycloak.sessions.AuthenticationSessionModel;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -49,7 +50,17 @@ public class AuthenticationContextBean {
 
 
     public boolean showUsername() {
-        return context != null && context.getUser() != null && context.getAuthenticationSession() != null && page!=LoginFormsPages.ERROR;
+        if (context == null) {
+            return false;
+        }
+
+        AuthenticationSessionModel authenticationSession = context.getAuthenticationSession();
+
+        if (Boolean.parseBoolean(authenticationSession.getAuthNote(AbstractUsernameFormAuthenticator.USERNAME_HIDDEN))) {
+            return getAttemptedUsername() != null;
+        }
+
+        return context.getUser() != null && authenticationSession != null && page!=LoginFormsPages.ERROR;
     }
 
     public boolean showResetCredentials() {
@@ -60,6 +71,10 @@ public class AuthenticationContextBean {
     // NOTE: This is called "attemptedUsername" as we won't necessarily display the username of the user, but the "attempted username", which he
     // used on the login screen (which could be eventually email or something else)
     public String getAttemptedUsername() {
+        if (context == null) {
+            return null;
+        }
+
         String username = context.getAuthenticationSession().getAuthNote(AbstractUsernameFormAuthenticator.ATTEMPTED_USERNAME);
 
         // Fallback to real username of the user just if attemptedUsername doesn't exist

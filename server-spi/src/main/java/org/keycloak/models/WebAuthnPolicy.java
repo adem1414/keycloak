@@ -40,6 +40,8 @@ public class WebAuthnPolicy implements Serializable {
     protected int createTimeout = 0; // not specified as option
     protected boolean avoidSameAuthenticatorRegister = false;
     protected List<String> acceptableAaguids;
+    protected List<String> extraOrigins;
+    protected Boolean passkeysEnabled; // only used for passwordless
 
     public WebAuthnPolicy() {
     }
@@ -49,7 +51,7 @@ public class WebAuthnPolicy implements Serializable {
     }
 
     // TODO : must be thread safe list
-    public static WebAuthnPolicy DEFAULT_POLICY = new WebAuthnPolicy(new ArrayList<>(Arrays.asList(Algorithm.ES256)));
+    public static WebAuthnPolicy DEFAULT_POLICY = new WebAuthnPolicy(new ArrayList<>(Arrays.asList(Algorithm.ES256,Algorithm.RS256)));
 
     public String getRpEntityName() {
         return rpEntityName;
@@ -129,5 +131,21 @@ public class WebAuthnPolicy implements Serializable {
 
     public void setAcceptableAaguids(List<String> acceptableAaguids) {
         this.acceptableAaguids = acceptableAaguids;
+    }
+
+    public List<String> getExtraOrigins(){
+        return extraOrigins;
+    }
+
+    public void setExtraOrigins(List<String> extraOrigins) {
+        this.extraOrigins = extraOrigins;
+    }
+
+    public Boolean isPasskeysEnabled() {
+        return passkeysEnabled;
+    }
+
+    public void setPasskeysEnabled(Boolean passkeysEnabled) {
+        this.passkeysEnabled = passkeysEnabled;
     }
 }

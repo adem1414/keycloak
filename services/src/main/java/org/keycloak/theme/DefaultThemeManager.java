@@ -18,26 +18,31 @@
 package org.keycloak.theme;
 
 import org.jboss.logging.Logger;
-import org.keycloak.Config;
-import org.keycloak.common.Version;
 import org.keycloak.common.util.StringPropertyReplacer;
 import org.keycloak.common.util.SystemEnvProperties;
 import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
 import org.keycloak.models.ThemeManager;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import org.keycloak.common.Profile;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
+
+import org.keycloak.services.util.LocaleUtil;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -97,6 +102,10 @@ public class DefaultThemeManager implements ThemeManager {
         factory.clearCache();
     }
 
+    @Override
+    public void close() {
+    }
+
     private Theme loadTheme(String name, Theme.Type type) {
         Theme theme = findTheme(name, type);
         if (theme == null) {
@@ -106,20 +115,19 @@ public class DefaultThemeManager implements ThemeManager {
         List<Theme> themes = new LinkedList<>();
         themes.add(theme);
 
-        if (theme.getImportName() != null) {
-            String[] s = theme.getImportName().split("/");
-            themes.add(findTheme(s[1], Theme.Type.valueOf(s[0].toUpperCase())));
-        }
+        if (!processImportedTheme(themes, theme, name, type)) return null;
 
         if (theme.getParentName() != null) {
             for (String parentName = theme.getParentName(); parentName != null; parentName = theme.getParentName()) {
+                String currentThemeName = theme.getName();
                 theme = findTheme(parentName, type);
+                if (theme == null) {
+                    log.warnf("Not found parent theme '%s' of theme '%s'. Unable to load %s theme '%s' due to this.", parentName, currentThemeName, type, name);
+                    return null;
+                }
                 themes.add(theme);
 
-                if (theme.getImportName() != null) {
-                    String[] s = theme.getImportName().split("/");
-                    themes.add(findTheme(s[1], Theme.Type.valueOf(s[0].toUpperCase())));
-                }
+                if (!processImportedTheme(themes, theme, name, type)) return null;
             }
         }
 
@@ -139,18 +147,42 @@ public class DefaultThemeManager implements ThemeManager {
         return null;
     }
 
+    private boolean processImportedTheme(List<Theme> themes, Theme theme, String origThemeName, Theme.Type type) {
+        if (theme.getImportName() != null) {
+            String[] s = theme.getImportName().split("/");
+            Theme importedTheme = findTheme(s[1], Theme.Type.valueOf(s[0].toUpperCase()));
+            if (importedTheme == null) {
+                log.warnf("Not found theme '%s' referenced as import of theme '%s'. Unable to load %s theme '%s' due to this.", theme.getImportName(), theme.getName(), type, origThemeName);
+                return false;
+            }
+            themes.add(importedTheme);
+        }
+        return true;
+    }
+
     private static class ExtendingTheme implements Theme {
 
-        private List<Theme> themes;
-        private Set<ThemeResourceProvider> themeResourceProviders;
+        private final List<Theme> themes;
+        private final Set<ThemeResourceProvider> themeResourceProviders;
 
         private Properties properties;
 
-        private ConcurrentHashMap<String, ConcurrentHashMap<Locale, Properties>> messages = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, ConcurrentHashMap<Locale, Map<Locale, Properties>>> messages =
+                new ConcurrentHashMap<>();
+
+        private Pattern compiledContentHashPattern;
 
         public ExtendingTheme(List<Theme> themes, Set<ThemeResourceProvider> themeResourceProviders) {
             this.themes = themes;
             this.themeResourceProviders = themeResourceProviders;
+            try {
+                Object contentHashPattern = getProperties().get(CONTENT_HASH_PATTERN);
+                if (contentHashPattern != null) {
+                    compiledContentHashPattern = Pattern.compile(contentHashPattern.toString());
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
         }
 
         @Override
@@ -218,33 +250,99 @@ public class DefaultThemeManager implements ThemeManager {
 
         @Override
         public Properties getMessages(String baseBundlename, Locale locale) throws IOException {
-            if (messages.get(baseBundlename) == null || messages.get(baseBundlename).get(locale) == null) {
-                Properties messages = new Properties();
+            Map<Locale, Properties> messagesByLocale = getMessagesByLocale(baseBundlename, locale);
+            return LocaleUtil.mergeGroupedMessages(locale, messagesByLocale);
+        }
+        
+        @Override
+        public Properties getEnhancedMessages(RealmModel realm, Locale locale) throws IOException {
+            Map<Locale, Properties> messagesByLocale = getMessagesByLocale("messages", locale);
+            return LocaleUtil.enhancePropertiesWithRealmLocalizationTexts(realm, locale, messagesByLocale);
+        }
 
+        @Override
+        public boolean hasContentHash(String path) throws IOException {
+            return compiledContentHashPattern != null && compiledContentHashPattern.matcher(path).matches();
+        }
+
+        private Map<Locale, Properties> getMessagesByLocale(String baseBundlename, Locale locale) throws IOException {
+            if (messages.get(baseBundlename) == null || messages.get(baseBundlename).get(locale) == null) {
                 Locale parent = getParent(locale);
 
-                if (parent != null) {
-                    messages.putAll(getMessages(baseBundlename, parent));
-                }
+                Map<Locale, Properties> parentMessages =
+                        parent == null ? Collections.emptyMap() : getMessagesByLocale(baseBundlename, parent);
 
-                for (ThemeResourceProvider t : themeResourceProviders ){
-                    messages.putAll(t.getMessages(baseBundlename, locale));
+                Properties currentMessages = new Properties();
+                Map<Locale, Properties> groupedMessages = new HashMap<>(parentMessages);
+                groupedMessages.put(locale, currentMessages);
+
+                for (ThemeResourceProvider t : themeResourceProviders) {
+                    currentMessages.putAll(t.getMessages(baseBundlename, locale));
                 }
 
                 ListIterator<Theme> itr = themes.listIterator(themes.size());
                 while (itr.hasPrevious()) {
                     Properties m = itr.previous().getMessages(baseBundlename, locale);
                     if (m != null) {
-                        messages.putAll(m);
+                        currentMessages.putAll(m);
                     }
                 }
-                
-                this.messages.putIfAbsent(baseBundlename, new ConcurrentHashMap<Locale, Properties>());
-                this.messages.get(baseBundlename).putIfAbsent(locale, messages);
 
-                return messages;
+                addlocaleTranslations(locale, currentMessages);
+
+                this.messages.putIfAbsent(baseBundlename, new ConcurrentHashMap<>());
+                this.messages.get(baseBundlename).putIfAbsent(locale, groupedMessages);
+
+                return groupedMessages;
             } else {
                 return messages.get(baseBundlename).get(locale);
+            }
+        }
+
+        protected void addlocaleTranslations(Locale locale, Properties m) throws IOException {
+            for (String l : getProperties().getProperty("locales", "").split(",")) {
+                l = l.trim();
+                String key = "locale_" + l;
+                String label = m.getProperty(key);
+                if (label != null) {
+                    continue;
+                }
+                String rl = l;
+                // This is mapping old locale codes to the new locale codes for Simplified and Traditional Chinese.
+                // Once the existing locales have been moved, this code can be removed.
+                if (l.equals("zh-CN")) {
+                    rl = "zh-Hans";
+                } else if (l.equals("zh-TW")) {
+                    rl = "zh-Hant";
+                }
+                Locale loc = Locale.forLanguageTag(rl);
+                label = capitalize(loc.getDisplayName(locale), locale);
+                if (!Objects.equals(loc, locale)) {
+                    label += " (" + capitalize(loc.getDisplayName(loc), loc) + ")";
+                }
+                m.put(key, label);
+            }
+        }
+
+        private static final Pattern LATIN_CHARACTERS;
+
+        static {
+            Pattern p;
+            try {
+                p = Pattern.compile("(\\p{L1}|\\p{InLATIN_EXTENDED_A}|\\p{InLATIN_EXTENDED_B}|\\p{InLATIN_EXTENDED_C}|\\p{InLATIN_EXTENDED_D}|\\p{InLATIN_EXTENDED_E}).*");
+            } catch (PatternSyntaxException ex) {
+                log.warn("unable to create regex for latin characters", ex);
+                // just in case the JVM doesn't recognize the language patterns used above
+                p = Pattern.compile("[a-zA-Z]");
+            }
+            LATIN_CHARACTERS = p;
+        }
+
+        private String capitalize(String name, Locale locale) {
+            if (LATIN_CHARACTERS.matcher(name).matches()) {
+                return name.substring(0, 1).toUpperCase(locale) + name.substring(1);
+            } else {
+                return name;
             }
         }
 
@@ -273,25 +371,13 @@ public class DefaultThemeManager implements ThemeManager {
          */
         private void substituteProperties(final Properties properties) {
             for (final String propertyName : properties.stringPropertyNames()) {
-                properties.setProperty(propertyName, StringPropertyReplacer.replaceProperties(properties.getProperty(propertyName), new SystemEnvProperties()));
+                properties.setProperty(propertyName, StringPropertyReplacer.replaceProperties(properties.getProperty(propertyName), SystemEnvProperties.UNFILTERED::getProperty));
             }
         }
     }
 
     private static Locale getParent(Locale locale) {
-        if (Locale.ENGLISH.equals(locale)) {
-            return null;
-        }
-
-        if (locale.getVariant() != null && !locale.getVariant().isEmpty()) {
-            return new Locale(locale.getLanguage(), locale.getCountry());
-        }
-
-        if (locale.getCountry() != null && !locale.getCountry().isEmpty()) {
-            return new Locale(locale.getLanguage());
-        }
-
-        return Locale.ENGLISH;
+        return LocaleUtil.getParentLocale(locale);
     }
 
     private List<ThemeProvider> getProviders() {
@@ -301,10 +387,6 @@ public class DefaultThemeManager implements ThemeManager {
         }
 
         return providers;
-    }
-
-    private static boolean isAccount2Enabled() {
-        return Profile.isFeatureEnabled(Profile.Feature.ACCOUNT2);
     }
 
 }

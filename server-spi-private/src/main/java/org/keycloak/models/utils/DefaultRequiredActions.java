@@ -23,6 +23,7 @@ import org.keycloak.models.RequiredActionProviderModel;
 import org.keycloak.models.UserModel;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -74,13 +75,16 @@ public class DefaultRequiredActions {
         UPDATE_PROFILE(UserModel.RequiredAction.UPDATE_PROFILE.name(), DefaultRequiredActions::addUpdateProfileAction),
         CONFIGURE_TOTP(UserModel.RequiredAction.CONFIGURE_TOTP.name(), DefaultRequiredActions::addConfigureTotpAction),
         UPDATE_PASSWORD(UserModel.RequiredAction.UPDATE_PASSWORD.name(), DefaultRequiredActions::addUpdatePasswordAction),
-        TERMS_AND_CONDITIONS("terms_and_conditions", DefaultRequiredActions::addTermsAndConditionsAction),
+        TERMS_AND_CONDITIONS(UserModel.RequiredAction.TERMS_AND_CONDITIONS.name(), DefaultRequiredActions::addTermsAndConditionsAction),
         DELETE_ACCOUNT("delete_account", DefaultRequiredActions::addDeleteAccountAction),
+        DELETE_CREDENTIAL("delete_credential", DefaultRequiredActions::addDeleteCredentialAction),
         UPDATE_USER_LOCALE("update_user_locale", DefaultRequiredActions::addUpdateLocaleAction),
         UPDATE_EMAIL(UserModel.RequiredAction.UPDATE_EMAIL.name(), DefaultRequiredActions::addUpdateEmailAction, () -> isFeatureEnabled(Profile.Feature.UPDATE_EMAIL)),
         CONFIGURE_RECOVERY_AUTHN_CODES(UserModel.RequiredAction.CONFIGURE_RECOVERY_AUTHN_CODES.name(), DefaultRequiredActions::addRecoveryAuthnCodesAction, () -> isFeatureEnabled(Profile.Feature.RECOVERY_CODES)),
         WEBAUTHN_REGISTER("webauthn-register", DefaultRequiredActions::addWebAuthnRegisterAction, () -> isFeatureEnabled(Profile.Feature.WEB_AUTHN)),
-        WEBAUTHN_PASSWORDLESS_REGISTER("webauthn-register-passwordless", DefaultRequiredActions::addWebAuthnPasswordlessRegisterAction, () -> isFeatureEnabled(Profile.Feature.WEB_AUTHN));
+        WEBAUTHN_PASSWORDLESS_REGISTER("webauthn-register-passwordless", DefaultRequiredActions::addWebAuthnPasswordlessRegisterAction, () -> isFeatureEnabled(Profile.Feature.WEB_AUTHN)),
+        VERIFY_USER_PROFILE(UserModel.RequiredAction.VERIFY_PROFILE.name(), DefaultRequiredActions::addVerifyProfile),
+        IDP_LINK_ACCOUNT("idp_link", DefaultRequiredActions::addIdpLink);
 
         private final String alias;
         private final Consumer<RealmModel> addAction;
@@ -169,15 +173,28 @@ public class DefaultRequiredActions {
     }
 
     public static void addTermsAndConditionsAction(RealmModel realm) {
-        if (realm.getRequiredActionProviderByAlias("terms_and_conditions") == null) {
+        if (realm.getRequiredActionProviderByAlias(UserModel.RequiredAction.TERMS_AND_CONDITIONS.name()) == null) {
             RequiredActionProviderModel termsAndConditions = new RequiredActionProviderModel();
             termsAndConditions.setEnabled(false);
-            termsAndConditions.setAlias("terms_and_conditions");
+            termsAndConditions.setAlias(UserModel.RequiredAction.TERMS_AND_CONDITIONS.name());
             termsAndConditions.setName("Terms and Conditions");
-            termsAndConditions.setProviderId("terms_and_conditions");
+            termsAndConditions.setProviderId(UserModel.RequiredAction.TERMS_AND_CONDITIONS.name());
             termsAndConditions.setDefaultAction(false);
             termsAndConditions.setPriority(20);
             realm.addRequiredActionProvider(termsAndConditions);
+        }
+    }
+
+    public static void addVerifyProfile(RealmModel realm) {
+        if (realm.getRequiredActionProviderByAlias(UserModel.RequiredAction.VERIFY_PROFILE.name()) == null) {
+            RequiredActionProviderModel verifyProfile = new RequiredActionProviderModel();
+            verifyProfile.setEnabled(true);
+            verifyProfile.setAlias(UserModel.RequiredAction.VERIFY_PROFILE.name());
+            verifyProfile.setName("Verify Profile");
+            verifyProfile.setProviderId(UserModel.RequiredAction.VERIFY_PROFILE.name());
+            verifyProfile.setDefaultAction(false);
+            verifyProfile.setPriority(100);
+            realm.addRequiredActionProvider(verifyProfile);
         }
     }
 
@@ -191,6 +208,32 @@ public class DefaultRequiredActions {
             deleteAccount.setDefaultAction(false);
             deleteAccount.setPriority(60);
             realm.addRequiredActionProvider(deleteAccount);
+        }
+    }
+
+    public static void addDeleteCredentialAction(RealmModel realm) {
+        if (realm.getRequiredActionProviderByAlias("delete_credential") == null) {
+            RequiredActionProviderModel deleteCredential = new RequiredActionProviderModel();
+            deleteCredential.setEnabled(true);
+            deleteCredential.setAlias("delete_credential");
+            deleteCredential.setName("Delete Credential");
+            deleteCredential.setProviderId("delete_credential");
+            deleteCredential.setDefaultAction(false);
+            deleteCredential.setPriority(110);
+            realm.addRequiredActionProvider(deleteCredential);
+        }
+    }
+    
+    public static void addIdpLink(RealmModel realm) {
+        if (realm.getRequiredActionProviderByAlias("idp_link") == null) {
+            RequiredActionProviderModel idpLink = new RequiredActionProviderModel();
+            idpLink.setEnabled(true);
+            idpLink.setAlias("idp_link");
+            idpLink.setName("Linking Identity Provider");
+            idpLink.setProviderId("idp_link");
+            idpLink.setDefaultAction(false);
+            idpLink.setPriority(120);
+            realm.addRequiredActionProvider(idpLink);
         }
     }
 
@@ -218,7 +261,7 @@ public class DefaultRequiredActions {
 
         if (!isRequiredActionActive) {
             RequiredActionProviderModel updateEmail = new RequiredActionProviderModel();
-            updateEmail.setEnabled(true);
+            updateEmail.setEnabled(false);
             updateEmail.setAlias(PROVIDER_ID);
             updateEmail.setName("Update Email");
             updateEmail.setProviderId(PROVIDER_ID);
@@ -244,7 +287,7 @@ public class DefaultRequiredActions {
             recoveryCodes.setName("Recovery Authentication Codes");
             recoveryCodes.setProviderId(PROVIDER_ID);
             recoveryCodes.setDefaultAction(false);
-            recoveryCodes.setPriority(70);
+            recoveryCodes.setPriority(130);
             realm.addRequiredActionProvider(recoveryCodes);
         }
     }
@@ -265,7 +308,7 @@ public class DefaultRequiredActions {
             webauthnRegister.setName("Webauthn Register");
             webauthnRegister.setProviderId(PROVIDER_ID);
             webauthnRegister.setDefaultAction(false);
-            webauthnRegister.setPriority(70);
+            webauthnRegister.setPriority(80);
             realm.addRequiredActionProvider(webauthnRegister);
         }
     }
@@ -286,8 +329,37 @@ public class DefaultRequiredActions {
             webauthnRegister.setName("Webauthn Register Passwordless");
             webauthnRegister.setProviderId(PROVIDER_ID);
             webauthnRegister.setDefaultAction(false);
-            webauthnRegister.setPriority(80);
+            webauthnRegister.setPriority(90);
             realm.addRequiredActionProvider(webauthnRegister);
         }
+    }
+
+    private static final HashSet<String> REQUIRED_ACTIONS = new HashSet<>();
+    static {
+        for (UserModel.RequiredAction value : UserModel.RequiredAction.values()) {
+            REQUIRED_ACTIONS.add(value.name());
+        }
+    }
+
+    /**
+     * Checks whether given {@code providerId} case insensitively matches any of {@link UserModel.RequiredAction} enum
+     * and if yes, it returns the value in correct form.
+     * <p/>
+     * This is necessary to stay backward compatible with older deployments where not all provider factories had ids
+     * in uppercase. This means that storage can contain some values in incorrect letter-case.
+     *
+     * @param providerId the required actions providerId
+     * @return providerId with correct letter-case, or the original value if it doesn't match any
+     *         of {@link UserModel.RequiredAction}
+     */
+    public static String getDefaultRequiredActionCaseInsensitively(String providerId) {
+        if (providerId == null) {
+            return null;
+        }
+        String upperCase = providerId.toUpperCase();
+        if (REQUIRED_ACTIONS.contains(upperCase)) {
+            return upperCase;
+        }
+        return providerId;
     }
 }

@@ -9,10 +9,10 @@ import org.keycloak.broker.oidc.AbstractOAuth2IdentityProvider;
 import org.keycloak.broker.oidc.mappers.AbstractJsonUserAttributeMapper;
 import org.keycloak.broker.provider.BrokeredIdentityContext;
 import org.keycloak.broker.provider.IdentityBrokerException;
-import org.keycloak.broker.provider.util.SimpleHttp;
 import org.keycloak.broker.social.SocialIdentityProvider;
 import org.keycloak.connections.httpclient.HttpClientProvider;
 import org.keycloak.events.EventBuilder;
+import org.keycloak.http.simple.SimpleHttp;
 import org.keycloak.models.KeycloakSession;
 
 import java.io.IOException;
@@ -94,10 +94,9 @@ public class OpenshiftV4IdentityProvider extends AbstractOAuth2IdentityProvider<
                 getJsonProperty(metadata, "uid") != null
                         ? getJsonProperty(metadata, "uid")
                         : tryGetKubeAdmin(metadata)
-        );
+        , getConfig());
         user.setUsername(getJsonProperty(metadata, "name"));
         user.setName(getJsonProperty(profile, "fullName"));
-        user.setIdpConfig(getConfig());
         user.setIdp(this);
         return user;
     }
@@ -111,7 +110,7 @@ public class OpenshiftV4IdentityProvider extends AbstractOAuth2IdentityProvider<
     }
 
     private JsonNode fetchProfile(String accessToken) throws IOException {
-        return SimpleHttp.doGet(getConfig().getUserInfoUrl(), this.session)
+        return SimpleHttp.create(session).doGet(getConfig().getUserInfoUrl())
                 .header("Authorization", "Bearer " + accessToken)
                 .asJson();
     }

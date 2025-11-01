@@ -30,17 +30,24 @@ import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventBuilder;
 import org.keycloak.events.EventType;
-import org.keycloak.models.*;
+import org.keycloak.models.AuthenticationExecutionModel;
+import org.keycloak.models.AuthenticatorConfigModel;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.KeycloakSessionFactory;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.UserModel;
 import org.keycloak.models.utils.FormMessage;
 import org.keycloak.provider.ProviderConfigProperty;
+import org.keycloak.provider.ProviderConfigurationBuilder;
 import org.keycloak.services.ServicesLogger;
+import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.messages.Messages;
 import org.keycloak.sessions.AuthenticationSessionCompoundId;
 import org.keycloak.sessions.AuthenticationSessionModel;
+import org.keycloak.storage.StorageId;
 
 import java.util.*;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.core.UriBuilder;
 import java.util.concurrent.TimeUnit;
 import org.jboss.logging.Logger;
 
@@ -53,6 +60,8 @@ public class ResetCredentialEmail implements Authenticator, AuthenticatorFactory
     private static final Logger logger = Logger.getLogger(ResetCredentialEmail.class);
 
     public static final String PROVIDER_ID = "reset-credential-email";
+    public static final String FORCE_LOGIN = "force-login";
+    public static final String FEDERATED_OPTION = "only-federated";
 
     @Override
     public void authenticate(AuthenticationFlowContext context) {
@@ -70,6 +79,10 @@ public class ResetCredentialEmail implements Authenticator, AuthenticatorFactory
         String actionTokenUserId = authenticationSession.getAuthNote(DefaultActionTokenKey.ACTION_TOKEN_USER_ID);
         if (actionTokenUserId != null && Objects.equals(user.getId(), actionTokenUserId)) {
             logger.debugf("Forget-password triggered when reauthenticating user after authentication via action token. Skipping " + PROVIDER_ID + " screen and using user '%s' ", user.getUsername());
+            if (forceLogin(context.getAuthenticatorConfig(), user)) {
+                // force end of auth session after the required actions
+                context.getAuthenticationSession().setAuthNote(AuthenticationManager.END_AFTER_REQUIRED_ACTIONS, "true");
+            }
             context.success();
             return;
         }
@@ -107,14 +120,12 @@ public class ResetCredentialEmail implements Authenticator, AuthenticatorFactory
             context.forkWithSuccessMessage(new FormMessage(Messages.EMAIL_SENT));
         } catch (EmailException e) {
             event.clone().event(EventType.SEND_RESET_PASSWORD)
+                    .detail(Details.REASON, e.getMessage())
                     .detail(Details.USERNAME, username)
                     .user(user)
                     .error(Errors.EMAIL_SEND_FAILED);
             ServicesLogger.LOGGER.failedToSendPwdResetEmail(e);
-            Response challenge = context.form()
-                    .setError(Messages.EMAIL_SENT_ERROR)
-                    .createErrorPage(Response.Status.INTERNAL_SERVER_ERROR);
-            context.failure(AuthenticationFlowError.INTERNAL_ERROR, challenge);
+            context.forkWithSuccessMessage(new FormMessage(Messages.EMAIL_SENT));
         }
     }
 
@@ -159,7 +170,7 @@ public class ResetCredentialEmail implements Authenticator, AuthenticatorFactory
 
     @Override
     public boolean isConfigurable() {
-        return false;
+        return true;
     }
 
     public static final AuthenticationExecutionModel.Requirement[] REQUIREMENT_CHOICES = {
@@ -183,7 +194,24 @@ public class ResetCredentialEmail implements Authenticator, AuthenticatorFactory
 
     @Override
     public List<ProviderConfigProperty> getConfigProperties() {
-        return null;
+        return ProviderConfigurationBuilder.create()
+                .property()
+                .name(FORCE_LOGIN)
+                .label("Force login after reset")
+                .helpText(
+                        """
+                        If this property is true, the user needs to login again after the reset credentials.
+                        If this property is false, the user will be automatically logged in after the succesful
+                        reset credentials when the same authentication session is used.
+                        If this property is only-federated (default), only federated users will be forced to login again,
+                        users stored in the internal database will be logged in if using the same authentication session.
+                        """
+                )
+                .type(ProviderConfigProperty.LIST_TYPE)
+                .options(Arrays.asList(Boolean.TRUE.toString(), Boolean.FALSE.toString(), FEDERATED_OPTION))
+                .defaultValue(FEDERATED_OPTION)
+                .add()
+                .build();
     }
 
     @Override
@@ -209,5 +237,20 @@ public class ResetCredentialEmail implements Authenticator, AuthenticatorFactory
     @Override
     public String getId() {
         return PROVIDER_ID;
+    }
+
+    private boolean forceLogin(AuthenticatorConfigModel config, UserModel user) {
+        final String forceLogin = config != null? config.getConfig().get(FORCE_LOGIN) : null;
+        if (forceLogin == null || FEDERATED_OPTION.equalsIgnoreCase(forceLogin)) {
+            // default is only-federated, return true only for federated users
+            return !StorageId.isLocalStorage(user.getId()) || user.isFederated();
+        } else if (Boolean.TRUE.toString().equalsIgnoreCase(forceLogin)) {
+            return Boolean.TRUE;
+        } else if (Boolean.FALSE.toString().equalsIgnoreCase(forceLogin)) {
+            return Boolean.FALSE;
+        } else {
+            logger.warnf("Invalid value for force-login option: %s", forceLogin);
+            throw new AuthenticationFlowException("Invalid value for force-login option: " + forceLogin, AuthenticationFlowError.INTERNAL_ERROR);
+        }
     }
 }

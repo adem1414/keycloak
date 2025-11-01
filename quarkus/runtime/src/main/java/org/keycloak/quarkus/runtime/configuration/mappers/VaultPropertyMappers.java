@@ -4,32 +4,33 @@ import org.keycloak.config.VaultOptions;
 
 import static org.keycloak.quarkus.runtime.configuration.mappers.PropertyMapper.fromOption;
 
-final class VaultPropertyMappers {
+import java.util.List;
 
-    private VaultPropertyMappers() {
-    }
+final class VaultPropertyMappers implements PropertyMapperGrouping {
 
-    public static PropertyMapper[] getVaultPropertyMappers() {
-        return new PropertyMapper[] {
+    @Override
+    public List<PropertyMapper<?>> getPropertyMappers() {
+        return List.of(
                 fromOption(VaultOptions.VAULT)
                         .paramLabel("provider")
                         .build(),
                 fromOption(VaultOptions.VAULT_DIR)
-                        .to("kc.spi-vault-file-dir")
+                        .to("kc.spi-vault--file--dir")
                         .paramLabel("dir")
                         .build(),
-                fromOption(VaultOptions.VAULT_UNMAPPED)
-                        .to("quarkus.vault.")
+                fromOption(VaultOptions.VAULT_FILE)
+                        .to("kc.spi-vault--keystore--file")
+                        .paramLabel("file")
                         .build(),
-                fromOption(VaultOptions.VAULT_URL)
-                        .to("quarkus.vault.url")
-                        .paramLabel("paths")
+                fromOption(VaultOptions.VAULT_PASS)
+                        .to("kc.spi-vault--keystore--pass")
+                        .paramLabel("pass")
                         .build(),
-                fromOption(VaultOptions.VAULT_KV_PATHS)
-                        .to("kc.spi-vault-hashicorp-paths")
-                        .paramLabel("paths")
+                fromOption(VaultOptions.VAULT_TYPE)
+                        .to("kc.spi-vault--keystore--type")
+                        .paramLabel("type")
                         .build()
-        };
+        );
     }
 
 }

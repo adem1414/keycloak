@@ -28,7 +28,6 @@ import org.keycloak.models.RealmModel;
 import org.keycloak.provider.ProviderFactory;
 
 import javax.crypto.SecretKey;
-import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.cert.Certificate;
 import java.util.Comparator;
@@ -153,7 +152,7 @@ public class DefaultKeyManager implements KeyManager {
     @Deprecated
     public ActiveRsaKey getActiveRsaKey(RealmModel realm) {
         KeyWrapper key = getActiveKey(realm, KeyUse.SIG, Algorithm.RS256);
-        return new ActiveRsaKey(key.getKid(), (PrivateKey) key.getPrivateKey(), (PublicKey) key.getPublicKey(), key.getCertificate());
+        return new ActiveRsaKey(key);
     }
 
     @Override

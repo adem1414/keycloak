@@ -54,7 +54,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -128,7 +127,7 @@ public class GroupLDAPStorageMapper extends AbstractLDAPStorageMapper implements
 
     public LDAPObject createLDAPGroup(String groupName, Map<String, Set<String>> additionalAttributes) {
         LDAPObject ldapGroup = LDAPUtils.createLDAPGroup(ldapProvider, groupName, config.getGroupNameLdapAttribute(), config.getGroupObjectClasses(ldapProvider),
-                config.getGroupsDn(), additionalAttributes, config.getMembershipLdapAttribute());
+                config.getRelativeCreateDn() + config.getGroupsDn(), additionalAttributes, config.getMembershipLdapAttribute());
 
         logger.debugf("Creating group [%s] to LDAP with DN [%s]", groupName, ldapGroup.getDn().toString());
         return ldapGroup;
@@ -195,13 +194,15 @@ public class GroupLDAPStorageMapper extends AbstractLDAPStorageMapper implements
         return syncResult;
     }
 
-    private void syncExistingGroup(GroupModel kcExistingGroup, Map.Entry<String, LDAPObject> groupEntry,
+    private void syncExistingGroup(RealmModel realm, GroupModel kcExistingGroup, Map.Entry<String, LDAPObject> groupEntry,
                                    SynchronizationResult syncResult, Set<String> visitedGroupIds, String groupName) {
         try {
             // Update each existing group to be synced in its own inner transaction to prevent race condition when
             // the groups intended to be updated was already deleted via other channel in the meantime
             KeycloakModelUtils.runJobInTransaction(ldapProvider.getSession().getKeycloakSessionFactory(), session -> {
-                updateAttributesOfKCGroup(kcExistingGroup, groupEntry.getValue());
+                RealmModel innerTransactionRealm = session.realms().getRealm(realm.getId());
+                GroupModel innerTransactionGroup = session.groups().getGroupById(innerTransactionRealm, kcExistingGroup.getId());
+                updateAttributesOfKCGroup(innerTransactionGroup, groupEntry.getValue());
                 syncResult.increaseUpdated();
                 visitedGroupIds.add(kcExistingGroup.getId());
             });
@@ -279,9 +280,9 @@ public class GroupLDAPStorageMapper extends AbstractLDAPStorageMapper implements
                     GroupModel kcExistingGroup = transactionGroupPathGroups.get(groupName);
 
                     if (kcExistingGroup != null) {
-                        syncExistingGroup(kcExistingGroup, groupEntry, syncResult, visitedGroupIds, groupName);
+                        syncExistingGroup(currentRealm, kcExistingGroup, groupEntry, syncResult, visitedGroupIds, groupName);
                     } else {
-                        syncNonExistingGroup(realm, groupEntry, syncResult, visitedGroupIds, groupName);
+                        syncNonExistingGroup(currentRealm, groupEntry, syncResult, visitedGroupIds, groupName);
                     }
                 }
             });
@@ -338,7 +339,9 @@ public class GroupLDAPStorageMapper extends AbstractLDAPStorageMapper implements
 
     private void dropNonExistingKcGroups(RealmModel realm, SynchronizationResult syncResult, Set<String> visitedGroupIds) {
         // Remove keycloak groups, which don't exist in LDAP
-        getAllKcGroups(realm)
+        GroupModel parent = getKcGroupsPathGroup(realm);
+
+        getAllKcGroups(realm, parent)
                 .filter(kcGroup -> !visitedGroupIds.contains(kcGroup.getId()))
                 .forEach(kcGroup -> {
                     logger.debugf("Removing Keycloak group '%s', which doesn't exist in LDAP", kcGroup.getName());
@@ -361,22 +364,22 @@ public class GroupLDAPStorageMapper extends AbstractLDAPStorageMapper implements
     }
 
 
-    protected GroupModel findKcGroupByLDAPGroup(RealmModel realm, LDAPObject ldapGroup) {
+    protected GroupModel findKcGroupByLDAPGroup(RealmModel realm, GroupModel parent, LDAPObject ldapGroup) {
         String groupNameAttr = config.getGroupNameLdapAttribute();
         String groupName = ldapGroup.getAttributeAsString(groupNameAttr);
 
         if (config.isPreserveGroupsInheritance()) {
             // Override if better effectivity or different algorithm is needed
-            return getAllKcGroups(realm)
+            return getAllKcGroups(realm, parent)
                     .filter(group -> Objects.equals(group.getName(), groupName)).findFirst().orElse(null);
         } else {
             // Without preserved inheritance, it's always at groups path
-            return KeycloakModelUtils.findGroupByPath(realm, getKcGroupPathFromLDAPGroupName(groupName));
+            return getSession().groups().getGroupByName(realm, parent, groupName);
         }
     }
 
-    protected GroupModel findKcGroupOrSyncFromLDAP(RealmModel realm, LDAPObject ldapGroup, UserModel user) {
-        GroupModel kcGroup = findKcGroupByLDAPGroup(realm, ldapGroup);
+    protected GroupModel findKcGroupOrSyncFromLDAP(RealmModel realm, GroupModel parent, LDAPObject ldapGroup, UserModel user) {
+        GroupModel kcGroup = findKcGroupByLDAPGroup(realm, parent, ldapGroup);
 
         if (kcGroup == null) {
 
@@ -385,7 +388,7 @@ public class GroupLDAPStorageMapper extends AbstractLDAPStorageMapper implements
                 // Better to sync all groups from LDAP with preserved inheritance
                 if (!syncFromLDAPPerformedInThisTransaction) {
                     syncDataFromFederationProviderToKeycloak(realm);
-                    kcGroup = findKcGroupByLDAPGroup(realm, ldapGroup);
+                    kcGroup = findKcGroupByLDAPGroup(realm, parent, ldapGroup);
                 }
             } else {
                 String groupNameAttr = config.getGroupNameLdapAttribute();
@@ -566,14 +569,20 @@ public class GroupLDAPStorageMapper extends AbstractLDAPStorageMapper implements
             return Collections.emptyList();
         }
 
+        if (!isGroupInGroupPath(realm, kcGroup)) {
+            // group being inspected is not managed by this mapper - return empty collection
+            return Collections.emptyList();
+        }
+
         // TODO: with ranged search in AD we can improve the search using the specific range (not done for the moment)
         LDAPObject ldapGroup = loadLDAPGroupByName(kcGroup.getName());
         if (ldapGroup == null) {
             return Collections.emptyList();
         }
 
-        MembershipType membershipType = config.getMembershipTypeLdapAttribute();
-        return membershipType.getGroupMembers(realm, this, ldapGroup, firstResult, maxResults);
+        String strategyKey = config.getUserGroupsRetrieveStrategy();
+        UserRolesRetrieveStrategy strategy = factory.getUserGroupsRetrieveStrategy(strategyKey);
+        return strategy.getLDAPRoleMembers(realm, this, ldapGroup, firstResult, maxResults);
     }
 
     public void addGroupMappingInLDAP(RealmModel realm, GroupModel kcGroup, LDAPObject ldapUser) {
@@ -656,14 +665,16 @@ public class GroupLDAPStorageMapper extends AbstractLDAPStorageMapper implements
         if (mode == LDAPGroupMapperMode.IMPORT && isCreate) {
 
             List<LDAPObject> ldapGroups = getLDAPGroupMappings(ldapUser);
+            if (!ldapGroups.isEmpty()) {
+                GroupModel parent = getKcGroupsPathGroup(realm);
+                // Import role mappings from LDAP into Keycloak DB
+                for (LDAPObject ldapGroup : ldapGroups) {
 
-            // Import role mappings from LDAP into Keycloak DB
-            for (LDAPObject ldapGroup : ldapGroups) {
-
-                GroupModel kcGroup = findKcGroupOrSyncFromLDAP(realm, ldapGroup, user);
-                if (kcGroup != null) {
-                    logger.debugf("User '%s' joins group '%s' during import from LDAP", user.getUsername(), kcGroup.getName());
-                    user.joinGroup(kcGroup);
+                    GroupModel kcGroup = findKcGroupOrSyncFromLDAP(realm, parent, ldapGroup, user);
+                    if (kcGroup != null) {
+                        logger.debugf("User '%s' joins group '%s' during import from LDAP", user.getUsername(), kcGroup.getName());
+                        user.joinGroup(kcGroup);
+                    }
                 }
             }
         }
@@ -698,18 +709,18 @@ public class GroupLDAPStorageMapper extends AbstractLDAPStorageMapper implements
         @Override
         public Stream<GroupModel> getGroupsStream() {
             Stream<GroupModel> ldapGroupMappings = getLDAPGroupMappingsConverted();
-            if (config.getMode() == LDAPGroupMapperMode.LDAP_ONLY) {
+            if (config.isTopLevelGroupsPath() && config.getMode() == LDAPGroupMapperMode.LDAP_ONLY) {
                 // Use just group mappings from LDAP
                 return ldapGroupMappings;
             } else {
-                // Merge mappings from both DB and LDAP
+                // Merge mappings from both DB and LDAP (including groups assigned from other group mappers)
                 return Stream.concat(ldapGroupMappings, super.getGroupsStream());
             }
         }
 
         @Override
         public void joinGroup(GroupModel group) {
-            if (config.getMode() == LDAPGroupMapperMode.LDAP_ONLY) {
+            if (config.getMode() == LDAPGroupMapperMode.LDAP_ONLY && isGroupInGroupPath(realm, group)) {
                 // We need to create new role mappings in LDAP
                 cachedLDAPGroupMappings = null;
                 addGroupMappingInLDAP(realm, group, ldapUser);
@@ -720,6 +731,11 @@ public class GroupLDAPStorageMapper extends AbstractLDAPStorageMapper implements
 
         @Override
         public void leaveGroup(GroupModel group) {
+            // if user is leaving group not managed by this mapper, let the call proceed to the next mapper or to the DB.
+            if (!isGroupInGroupPath(realm, group)) {
+                super.leaveGroup(group);
+            }
+
             try (LDAPQuery ldapQuery = createGroupQuery(true)) {
                 LDAPQueryConditionsBuilder conditionsBuilder = new LDAPQueryConditionsBuilder();
                 Condition roleNameCondition = conditionsBuilder.equal(config.getGroupNameLdapAttribute(), group.getName());
@@ -751,6 +767,10 @@ public class GroupLDAPStorageMapper extends AbstractLDAPStorageMapper implements
 
         @Override
         public boolean isMemberOf(GroupModel group) {
+            if (!isGroupInGroupPath(realm, group)) {
+                // this mapper doesn't manage the group - delegate to the next mapper or the JPA store.
+                return super.isMemberOf(group);
+            }
             return RoleUtils.isDirectMember(getGroupsStream(),group);
         }
 
@@ -760,13 +780,17 @@ public class GroupLDAPStorageMapper extends AbstractLDAPStorageMapper implements
             }
 
             List<LDAPObject> ldapGroups = getLDAPGroupMappings(ldapUser);
+            if (!ldapGroups.isEmpty()) {
+                GroupModel parent = getKcGroupsPathGroup(realm);
 
-            cachedLDAPGroupMappings = ldapGroups.stream()
-                    .map(ldapGroup -> findKcGroupOrSyncFromLDAP(realm, ldapGroup, this))
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toSet());
+                cachedLDAPGroupMappings = ldapGroups.stream()
+                        .map(ldapGroup -> findKcGroupOrSyncFromLDAP(realm, parent, ldapGroup, this))
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toSet());
 
-            return cachedLDAPGroupMappings.stream();
+                return cachedLDAPGroupMappings.stream();
+            }
+            return Stream.empty();
         }
     }
 
@@ -783,7 +807,27 @@ public class GroupLDAPStorageMapper extends AbstractLDAPStorageMapper implements
      * Provides KC group defined as groups path or null (top-level group) if corresponding group is not available.
      */
     protected GroupModel getKcGroupsPathGroup(RealmModel realm) {
-        return config.isTopLevelGroupsPath() ? null : KeycloakModelUtils.findGroupByPath(realm, config.getGroupsPath());
+        return config.isTopLevelGroupsPath() ? null : KeycloakModelUtils.findGroupByPath(getSession(), realm, config.getGroupsPath());
+    }
+
+    protected boolean isGroupInGroupPath(RealmModel realm, GroupModel group) {
+        if (group.getType() == GroupModel.Type.ORGANIZATION) {
+            return false; // always skip organization groups as those are internal groups.
+        }
+        if (config.isTopLevelGroupsPath()) {
+            return true; // any group is in the path of the top level path.
+        }
+        GroupModel groupPathGroup = KeycloakModelUtils.findGroupByPath(getSession(), realm, config.getGroupsPath());
+        if (groupPathGroup != null) {
+            while(!groupPathGroup.getId().equals(group.getId())) {
+                group = group.getParent();
+                if (group == null) {
+                    return false; // we checked every ancestor group, and none matches the group path group.
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -807,15 +851,14 @@ public class GroupLDAPStorageMapper extends AbstractLDAPStorageMapper implements
         if (parentGroup == null) {
             parentGroup = getKcGroupsPathGroup(realm);
         }
-        return parentGroup == null ? realm.getTopLevelGroupsStream() : parentGroup.getSubGroupsStream();
+        return parentGroup == null ? getSession().groups().getTopLevelGroupsStream(realm) :
+            parentGroup.getSubGroupsStream();
     }
 
     /**
      * Provides a stream of all KC groups (with their sub groups) from groups path configured by the "Groups Path" configuration property.
      */
-    protected Stream<GroupModel> getAllKcGroups(RealmModel realm) {
-        GroupModel topParentGroup = getKcGroupsPathGroup(realm);
-
+    protected Stream<GroupModel> getAllKcGroups(RealmModel realm, GroupModel topParentGroup) {
         Stream<GroupModel> allGroups = realm.getGroupsStream();
         if (topParentGroup == null) return allGroups;
 

@@ -2,20 +2,26 @@ package org.keycloak.quarkus.runtime.configuration.mappers;
 
 import org.keycloak.config.MetricsOptions;
 
+import static org.keycloak.quarkus.runtime.configuration.Configuration.isTrue;
 import static org.keycloak.quarkus.runtime.configuration.mappers.PropertyMapper.fromOption;
 
+import java.util.List;
 
-final class MetricsPropertyMappers {
 
-    private MetricsPropertyMappers(){}
+final class MetricsPropertyMappers implements PropertyMapperGrouping {
 
-    public static PropertyMapper[] getMetricsPropertyMappers() {
-        return new PropertyMapper[] {
+    public static final String METRICS_ENABLED_MSG = "metrics are enabled";
+
+    @Override
+    public List<PropertyMapper<?>> getPropertyMappers() {
+        return List.of(
                 fromOption(MetricsOptions.METRICS_ENABLED)
-                        .to("quarkus.smallrye-metrics.extensions.enabled")
-                        .paramLabel(Boolean.TRUE + "|" + Boolean.FALSE)
+                        .to("quarkus.micrometer.enabled")
                         .build()
-        };
+        );
     }
 
+    public static boolean metricsEnabled() {
+        return isTrue(MetricsOptions.METRICS_ENABLED);
+    }
 }

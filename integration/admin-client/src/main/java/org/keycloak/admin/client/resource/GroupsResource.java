@@ -19,9 +19,9 @@ package org.keycloak.admin.client.resource;
 
 import org.keycloak.representations.idm.GroupRepresentation;
 
-import javax.ws.rs.*;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.util.List;
 import java.util.Map;
 
@@ -41,8 +41,8 @@ public interface GroupsResource {
 
     /**
      * Get groups by pagination params.
-     * @param first index of the first element
-     * @param max max number of occurrences
+     * @param first index of the first element (pagination offset).
+     * @param max the maximum number of results.
      * @return A list containing the slice of all groups.
      */
     @GET
@@ -52,9 +52,9 @@ public interface GroupsResource {
 
     /**
      * Get groups by pagination params.
-     * @param search max number of occurrences
-     * @param first index of the first element
-     * @param max max number of occurrences
+     * @param search A {@code String} representing either an exact or partial group name.
+     * @param first index of the first element (pagination offset).
+     * @param max the maximum number of results.
      * @return A list containing the slice of all groups.
      */
     @GET
@@ -66,10 +66,12 @@ public interface GroupsResource {
 
     /**
      * Get groups by pagination params.
-     * @param search max number of occurrences
-     * @param first index of the first element
-     * @param max max number of occurrences
-     * @param briefRepresentation if false, return groups with their attributes
+     * @param search A {@code String} representing either an exact or partial group name.
+     * @param first index of the first element (pagination offset).
+     * @param max the maximum number of results.
+     * @param briefRepresentation if {@code true}, each returned group representation will only contain basic information
+     *                            (id, name, path, and parentId). If {@code false}, the complete representations of the groups
+     *                            are returned (including role mappings and attributes).
      * @return A list containing the slice of all groups.
      */
     @GET
@@ -82,11 +84,37 @@ public interface GroupsResource {
 
     /**
      * Get groups by pagination params.
-     * @param search search string for group
-     * @param exact exact match for search
-     * @param first index of the first element
-     * @param max max number of occurrences
-     * @param briefRepresentation if false, return groups with their attributes
+     * @param search A {@code String} representing either an exact or partial group name.
+     * @param exact if {@code true}, the groups will be searched using exact match for the {@code search} param. If false,
+     *      *              the method returns all groups that partially match the specified name.
+     * @param first index of the first element (pagination offset).
+     * @param max the maximum number of results.
+     * @param briefRepresentation if {@code true}, each returned group representation will only contain basic information
+     *                            (id, name, path, and parentId). If {@code false}, the complete representations of the groups
+     *                            are returned (including role mappings and attributes).
+     * @param subGroupsCount if {@code true}, the count of subgroups is returned for each subgroup. Defaults to true. Parameter supported since Keycloak 26.3. For older versions, it is always true.
+     * @return A list containing the slice of all groups.
+     */
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
+    List<GroupRepresentation> groups(@QueryParam("search") String search,
+                                     @QueryParam("exact") Boolean exact,
+                                     @QueryParam("first") Integer first,
+                                     @QueryParam("max") Integer max,
+                                     @QueryParam("briefRepresentation") @DefaultValue("true") boolean briefRepresentation,
+                                     @QueryParam("subGroupsCount") @DefaultValue("true") Boolean subGroupsCount);
+
+    /**
+     * Get groups by pagination params.
+     * @param search A {@code String} representing either an exact or partial group name.
+     * @param exact if {@code true}, the groups will be searched using exact match for the {@code search} param. If false,
+     *      *              the method returns all groups that partially match the specified name.
+     * @param first index of the first element (pagination offset).
+     * @param max the maximum number of results.
+     * @param briefRepresentation if {@code true}, each returned group representation will only contain basic information
+     *                            (id, name, path, and parentId). If {@code false}, the complete representations of the groups
+     *                            are returned (including role mappings and attributes).
      * @return A list containing the slice of all groups.
      */
     @GET
@@ -146,4 +174,15 @@ public interface GroupsResource {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     List<GroupRepresentation> query(@QueryParam("q") String searchQuery);
+
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    List<GroupRepresentation> query(@QueryParam("q") String searchQuery, @QueryParam("populateHierarchy") boolean populateHierarchy);
+
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    List<GroupRepresentation> query(@QueryParam("q") String searchQuery,
+            @QueryParam("populateHierarchy") boolean populateHierarchy, @QueryParam("first") Integer first,
+            @QueryParam("max") Integer max, @QueryParam("briefRepresentation") boolean briefRepresentation);
+
 }

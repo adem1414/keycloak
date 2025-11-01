@@ -17,7 +17,7 @@
 
 package org.keycloak.models;
 
-import org.keycloak.crypto.Algorithm;
+import org.jboss.logging.Logger;
 import org.keycloak.policy.PasswordPolicyConfigException;
 import org.keycloak.policy.PasswordPolicyProvider;
 
@@ -32,21 +32,25 @@ import java.util.Set;
  */
 public class PasswordPolicy implements Serializable {
 
+    protected static final Logger logger = Logger.getLogger(PasswordPolicy.class);
+
     public static final String HASH_ALGORITHM_ID = "hashAlgorithm";
 
-    public static final String HASH_ALGORITHM_DEFAULT = "pbkdf2-sha256";
-
     public static final String HASH_ITERATIONS_ID = "hashIterations";
-
-    public static final int HASH_ITERATIONS_DEFAULT = 27500;
 
     public static final String PASSWORD_HISTORY_ID = "passwordHistory";
 
     public static final String FORCE_EXPIRED_ID = "forceExpiredPasswordChange";
 
+    @Deprecated
     public static final int RECOVERY_CODES_WARNING_THRESHOLD_DEFAULT = 4;
 
+    @Deprecated
     public static final String RECOVERY_CODES_WARNING_THRESHOLD_ID = "recoveryCodesWarningThreshold";
+
+    public static final String MAX_AUTH_AGE_ID = "maxAuthAge";
+
+    public static final String PASSWORD_AGE = "passwordAge";
 
     private Map<String, Object> policyConfig;
     private Builder builder;
@@ -80,7 +84,7 @@ public class PasswordPolicy implements Serializable {
         if (policyConfig.containsKey(HASH_ALGORITHM_ID)) {
             return getPolicyConfig(HASH_ALGORITHM_ID);
         } else {
-            return HASH_ALGORITHM_DEFAULT;
+            return null;
         }
     }
 
@@ -100,6 +104,14 @@ public class PasswordPolicy implements Serializable {
         }
     }
 
+    public int getPasswordAgeInDays() {
+        if (policyConfig.containsKey(PASSWORD_AGE)) {
+            return getPolicyConfig(PASSWORD_AGE);
+        } else {
+            return -1;
+        }
+    }
+
     public int getDaysToExpirePassword() {
         if (policyConfig.containsKey(FORCE_EXPIRED_ID)) {
             return getPolicyConfig(FORCE_EXPIRED_ID);
@@ -108,11 +120,33 @@ public class PasswordPolicy implements Serializable {
         }
     }
 
+    @Deprecated
     public int getRecoveryCodesWarningThreshold() {
         if (policyConfig.containsKey(RECOVERY_CODES_WARNING_THRESHOLD_ID)) {
+            logger.warnf("It is deprecated to use Warning Threshold password policy. Please use the configuration on Recovery Authentication Codes required action instead.");
             return getPolicyConfig(RECOVERY_CODES_WARNING_THRESHOLD_ID);
         } else {
             return 4;
+        }
+    }
+
+    /**
+     * Policy to configure the maximum age of the authentication in seconds.
+     *
+     * If the user authentication is older than the given value, a reauthentication is enforced.
+     *
+     * Examples:
+     * <ul>
+     * <li>{@code maxAuthAge(0)} means the user has to reauthenticate immediately.</li>
+     * <li>{@code maxAuthAge(60)} means the user has to reauthenticate if authentication is older than 60 seconds.</li>
+     * </ul>
+     * @return
+     */
+    public int getMaxAuthAge() {
+        if (policyConfig.containsKey(MAX_AUTH_AGE_ID)) {
+            return getPolicyConfig(MAX_AUTH_AGE_ID);
+        } else {
+            return -1;
         }
     }
 

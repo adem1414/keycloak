@@ -30,6 +30,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -102,12 +103,12 @@ public class Timer {
     public void clearStats(boolean logStats, boolean saveData, boolean saveCharts) {
         if (logStats) {
             log.info("Timer Statistics:");
-            for (String op : stats.keySet()) {
+            for (var entry : stats.entrySet()) {
                 long sum = 0;
-                for (Long duration : stats.get(op)) {
+                for (Long duration : entry.getValue()) {
                     sum += duration;
                 }
-                log.info(String.format("Operation '%s' average: %s ms", op, sum / stats.get(op).size()));
+                log.info(String.format("Operation '%s' average: %s ms", entry.getKey(), sum / entry.getValue().size()));
             }
         }
         if (PROJECT_BUILD_DIRECTORY.exists()) {
@@ -133,8 +134,8 @@ public class Timer {
             }
             OutputStream stream = new BufferedOutputStream(new FileOutputStream(f));
             for (Long duration : stats.get(op)) {
-                IOUtils.write(duration.toString(), stream, "UTF-8");
-                IOUtils.write("\n", stream, "UTF-8");
+                IOUtils.write(duration.toString(), stream, StandardCharsets.UTF_8);
+                IOUtils.write("\n", stream, StandardCharsets.UTF_8);
             }
             stream.flush();
             IOUtils.closeQuietly(stream);

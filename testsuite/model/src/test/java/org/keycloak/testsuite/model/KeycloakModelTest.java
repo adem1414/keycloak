@@ -1,13 +1,13 @@
 /*
  * Copyright 2020 Red Hat, Inc. and/or its affiliates
  * and other contributors as indicated by the @author tags.
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  * http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,6 +24,8 @@ import org.keycloak.authorization.policy.provider.PolicyProviderFactory;
 import org.keycloak.authorization.policy.provider.PolicySpi;
 import org.keycloak.authorization.store.StoreFactorySpi;
 import org.keycloak.cluster.ClusterSpi;
+import org.keycloak.common.Profile;
+import org.keycloak.common.profile.PropertiesProfileConfigResolver;
 import org.keycloak.common.util.Time;
 import org.keycloak.component.ComponentFactoryProviderFactory;
 import org.keycloak.component.ComponentFactorySpi;
@@ -51,10 +53,12 @@ import org.keycloak.provider.ProviderManager;
 import org.keycloak.provider.Spi;
 import org.keycloak.services.DefaultComponentFactoryProviderFactory;
 import org.keycloak.services.DefaultKeycloakSessionFactory;
+import org.keycloak.services.resteasy.ResteasyKeycloakSessionFactory;
+import org.keycloak.spi.infinispan.CacheRemoteConfigProviderFactory;
+import org.keycloak.spi.infinispan.CacheRemoteConfigProviderSpi;
 import org.keycloak.storage.DatastoreProviderFactory;
 import org.keycloak.storage.DatastoreSpi;
 import org.keycloak.timer.TimerSpi;
-import com.google.common.collect.ImmutableSet;
 
 import java.lang.management.LockInfo;
 import java.lang.management.ManagementFactory;
@@ -77,11 +81,12 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -99,7 +104,10 @@ import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 import org.keycloak.models.DeploymentStateProviderFactory;
-import org.keycloak.models.dblock.DBLockSpi;
+import org.keycloak.tracing.TracingProviderFactory;
+import org.keycloak.tracing.TracingSpi;
+
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 /**
  * Base of testcases that operate on session level. The tests derived from this class
@@ -115,7 +123,6 @@ import org.keycloak.models.dblock.DBLockSpi;
  * @author hmlnarik
  */
 public abstract class KeycloakModelTest {
-
     private static final Logger LOG = Logger.getLogger(KeycloakModelParameters.class);
     private static final AtomicInteger FACTORY_COUNT = new AtomicInteger();
     protected final Logger log = Logger.getLogger(getClass());
@@ -132,9 +139,7 @@ public abstract class KeycloakModelTest {
                 testClass = testClass.getSuperclass();
             }
             List<Class<? extends Provider>> notFound = st
-              .filter(rp -> rp.only().length == 0 
-                ? getFactory().getProviderFactory(rp.value()) == null
-                : Stream.of(rp.only()).allMatch(provider -> getFactory().getProviderFactory(rp.value(), provider) == null))
+              .filter(KeycloakModelTest::checkProviderAvailability)
               .map(RequireProvider::value)
               .collect(Collectors.toList());
             Assume.assumeThat("Some required providers not found", notFound, Matchers.empty());
@@ -147,14 +152,33 @@ public abstract class KeycloakModelTest {
         }
     };
 
+    // Returns true if annotation requirement is not met
+    private static boolean checkProviderAvailability(RequireProvider annotation) {
+        Set<String> allFactories = getFactory().getProviderFactoriesStream(annotation.value()).map(ProviderFactory::getId).collect(Collectors.toSet());
+        List<String> only = Arrays.asList(annotation.only());
+        List<String> exclude = Arrays.asList(annotation.exclude());
+
+        // There is no factory for required provider
+        if (allFactories.isEmpty()) return true;
+
+        // Remove excluded ids
+        allFactories.removeIf(exclude::contains);
+
+        // Remove not matching only
+        allFactories.removeIf(id -> !only.isEmpty() && !only.contains(id));
+
+        // If there is no factory return true
+        return allFactories.isEmpty();
+    }
+
     @Rule
     public final TestRule guaranteeRequiredFactoryOnMethod = new TestRule() {
         @Override
         public Statement apply(Statement base, Description description) {
             Stream<RequireProvider> st = Optional.ofNullable(description.getAnnotation(RequireProviders.class))
-              .map(RequireProviders::value)
-              .map(Stream::of)
-              .orElseGet(Stream::empty);
+                    .map(RequireProviders::value)
+                    .stream()
+                    .flatMap(Stream::of);
 
             RequireProvider rp = description.getAnnotation(RequireProvider.class);
             if (rp != null) {
@@ -209,36 +233,37 @@ public abstract class KeycloakModelTest {
         }
     };
 
-    private static final Set<Class<? extends Spi>> ALLOWED_SPIS = ImmutableSet.<Class<? extends Spi>>builder()
-      .add(AuthorizationSpi.class)
-      .add(PolicySpi.class)
-      .add(ClientScopeSpi.class)
-      .add(ClientSpi.class)
-      .add(ComponentFactorySpi.class)
-      .add(ClusterSpi.class)
-      .add(DBLockSpi.class)
-      .add(EventStoreSpi.class)
-      .add(ExecutorsSpi.class)
-      .add(GroupSpi.class)
-      .add(RealmSpi.class)
-      .add(RoleSpi.class)
-      .add(DeploymentStateSpi.class)
-      .add(StoreFactorySpi.class)
-      .add(TimerSpi.class)
-      .add(UserLoginFailureSpi.class)
-      .add(UserSessionSpi.class)
-      .add(UserSpi.class)
-      .add(DatastoreSpi.class)
-      .build();
+    private static final Set<Class<? extends Spi>> ALLOWED_SPIS = Set.of(
+            AuthorizationSpi.class,
+            PolicySpi.class,
+            ClientScopeSpi.class,
+            ClientSpi.class,
+            ComponentFactorySpi.class,
+            ClusterSpi.class,
+            EventStoreSpi.class,
+            ExecutorsSpi.class,
+            GroupSpi.class,
+            RealmSpi.class,
+            RoleSpi.class,
+            DeploymentStateSpi.class,
+            StoreFactorySpi.class,
+            TimerSpi.class,
+            TracingSpi.class,
+            UserLoginFailureSpi.class,
+            UserSessionSpi.class,
+            UserSpi.class,
+            DatastoreSpi.class,
+            CacheRemoteConfigProviderSpi.class);
 
-    private static final Set<Class<? extends ProviderFactory>> ALLOWED_FACTORIES = ImmutableSet.<Class<? extends ProviderFactory>>builder()
-      .add(ComponentFactoryProviderFactory.class)
-      .add(DefaultAuthorizationProviderFactory.class)
-      .add(PolicyProviderFactory.class)
-      .add(DefaultExecutorsProviderFactory.class)
-      .add(DeploymentStateProviderFactory.class)
-      .add(DatastoreProviderFactory.class)
-      .build();
+    private static final Set<Class<? extends ProviderFactory>> ALLOWED_FACTORIES = Set.of(
+            ComponentFactoryProviderFactory.class,
+            DefaultAuthorizationProviderFactory.class,
+            PolicyProviderFactory.class,
+            DefaultExecutorsProviderFactory.class,
+            DeploymentStateProviderFactory.class,
+            DatastoreProviderFactory.class,
+            TracingProviderFactory.class,
+            CacheRemoteConfigProviderFactory.class);
 
     protected static final List<KeycloakModelParameters> MODEL_PARAMETERS;
     protected static final Config CONFIG = new Config(KeycloakModelTest::useDefaultFactory);
@@ -254,9 +279,9 @@ public abstract class KeycloakModelTest {
           Stream.of(basicParameters),
           Stream.of(System.getProperty("keycloak.model.parameters", "").split("\\s*,\\s*"))
             .filter(s -> s != null && ! s.trim().isEmpty())
-            .map(cn -> { try { return Class.forName(cn.indexOf('.') >= 0 ? cn : ("org.keycloak.testsuite.model.parameters." + cn)); } catch (Exception e) { LOG.error("Cannot find " + cn); return null; }})
+            .map(cn -> { try { return Class.forName(cn.indexOf('.') >= 0 ? cn : ("org.keycloak.testsuite.model.parameters." + cn)); } catch (Exception e) { throw new RuntimeException("Cannot find class " + cn, e); }})
             .filter(Objects::nonNull)
-            .map(c -> { try { return c.getDeclaredConstructor().newInstance(); } catch (Exception e) { LOG.error("Cannot instantiate " + c); return null; }} )
+            .map(c -> { try { return c.getDeclaredConstructor().newInstance(); } catch (Exception e) { throw new RuntimeException("Cannot instantiate class " + c, e); }} )
             .filter(KeycloakModelParameters.class::isInstance)
             .map(KeycloakModelParameters.class::cast)
           )
@@ -289,7 +314,14 @@ public abstract class KeycloakModelTest {
 
         LOG.debugf("Creating factory %d in %s using the following configuration:\n    %s", factoryIndex, threadName, CONFIG);
 
-        DefaultKeycloakSessionFactory res = new DefaultKeycloakSessionFactory() {
+        DefaultKeycloakSessionFactory res = new ResteasyKeycloakSessionFactory() {
+
+            @Override
+            public void init() {
+                Profile.configure(new PropertiesProfileConfigResolver(System.getProperties()));
+                super.init();
+            }
+
             @Override
             protected boolean isEnabled(ProviderFactory factory, Scope scope) {
                 return super.isEnabled(factory, scope) && isFactoryAllowed(factory);
@@ -314,9 +346,14 @@ public abstract class KeycloakModelTest {
                 return "KeycloakSessionFactory " + factoryIndex + " (from " + threadName + " thread)";
             }
         };
-        res.init();
-        res.publish(new PostMigrationEvent(res));
-        return res;
+        try {
+            res.init();
+            res.publish(new PostMigrationEvent(res));
+            return res;
+        } catch (RuntimeException ex) {
+            res.close();
+            throw ex;
+        }
     }
 
     /**
@@ -364,7 +401,7 @@ public abstract class KeycloakModelTest {
             CountDownLatch start = new CountDownLatch(numThreads);
             CountDownLatch stop = new CountDownLatch(numThreads);
             Callable<?> independentTask = () -> inIndependentFactory(() -> {
-
+                LOG.infof("Started Keycloak server in thread: %s", Thread.currentThread().getName());
                 // use the latch to ensure that all caches are online while the transaction below runs to avoid a RemoteException
                 start.countDown();
                 start.await();
@@ -458,11 +495,11 @@ public abstract class KeycloakModelTest {
             throw new IllegalStateException("USE_DEFAULT_FACTORY must be false to use an independent factory");
         }
         KeycloakSessionFactory original = getFactory();
-        KeycloakSessionFactory factory = createKeycloakSessionFactory();
         try {
-            setFactory(factory);
+            setFactory(createKeycloakSessionFactory());
             return task.call();
         } catch (Exception ex) {
+            LOG.errorf(ex, "Exception caught while starting Keycloak server in thread %s", Thread.currentThread().getName());
             throw new RuntimeException(ex);
         } finally {
             closeKeycloakSessionFactory();
@@ -499,31 +536,32 @@ public abstract class KeycloakModelTest {
 
     @Before
     public final void createEnvironment() {
-        Time.setOffset(0);
+        setTimeOffset(0);
         USE_DEFAULT_FACTORY = isUseSameKeycloakSessionFactoryForAllThreads();
         KeycloakModelUtils.runJobInTransaction(getFactory(), this::createEnvironment);
     }
 
     @After
     public final void cleanEnvironment() {
-        Time.setOffset(0);
         if (getFactory() == null) {
             reinitializeKeycloakSessionFactory();
         }
+        setTimeOffset(0);
         KeycloakModelUtils.runJobInTransaction(getFactory(), this::cleanEnvironment);
     }
 
-    protected <T> Stream<T> getParameters(Class<T> clazz) {
+    protected static <T> Stream<T> getParameters(Class<T> clazz) {
         return MODEL_PARAMETERS.stream().flatMap(mp -> mp.getParameters(clazz)).filter(Objects::nonNull);
     }
 
     protected <T> void inRolledBackTransaction(T parameter, BiConsumer<KeycloakSession, T> what) {
-        KeycloakSession session = getFactory().create();
-        session.getTransactionManager().begin();
+        try (KeycloakSession session = getFactory().create()) {
+            session.getTransactionManager().begin();
 
-        what.accept(session, parameter);
+            what.accept(session, parameter);
 
-        session.getTransactionManager().rollback();
+            session.getTransactionManager().setRollbackOnly();
+        }
     }
 
     protected <T, R> R inComittedTransaction(T parameter, BiFunction<KeycloakSession, T, R> what) {
@@ -539,8 +577,7 @@ public abstract class KeycloakModelTest {
     }
 
     protected <T, R> R inComittedTransaction(T parameter, BiFunction<KeycloakSession, T, R> what, BiConsumer<KeycloakSession, T> onCommit, BiConsumer<KeycloakSession, T> onRollback) {
-        AtomicReference<R> res = new AtomicReference<>();
-        KeycloakModelUtils.runJobInTransaction(getFactory(), session -> {
+        return KeycloakModelUtils.runJobInTransactionWithResult(getFactory(), session -> {
             session.getTransactionManager().enlistAfterCompletion(new AbstractKeycloakTransaction() {
                 @Override
                 protected void commitImpl() {
@@ -552,9 +589,8 @@ public abstract class KeycloakModelTest {
                     if (onRollback != null) { onRollback.accept(session, parameter); }
                 }
             });
-            res.set(what.apply(session, parameter));
+            return what.apply(session, parameter);
         });
-        return res.get();
     }
 
     /**
@@ -570,6 +606,13 @@ public abstract class KeycloakModelTest {
         });
     }
 
+   protected void withRealmConsumer(String realmId, BiConsumer<KeycloakSession, RealmModel> what) {
+       withRealm(realmId, (session, realm) -> {
+          what.accept(session, realm);
+          return null;
+       });
+   }
+
     protected boolean isUseSameKeycloakSessionFactoryForAllThreads() {
         return false;
     }
@@ -583,4 +626,58 @@ public abstract class KeycloakModelTest {
         }
     }
 
+    protected static RealmModel createRealm(KeycloakSession s, String name) {
+        RealmModel realm = s.realms().getRealmByName(name);
+        if (realm != null) {
+            RealmModel current = s.getContext().getRealm();
+            s.getContext().setRealm(realm);
+            // The previous test didn't clean up the realm for some reason, cleanup now
+            s.realms().removeRealm(realm.getId());
+            s.getContext().setRealm(current);
+        }
+        realm = s.realms().createRealm(name);
+        return realm;
+    }
+
+    /**
+     * Moves time on the Keycloak server
+     * @param seconds time offset in seconds by which Keycloak server time is moved
+     */
+    protected void setTimeOffset(int seconds) {
+        inComittedTransaction(session -> {
+            Time.setOffset(seconds);
+        });
+    }
+
+    public static void eventually(BooleanSupplier condition) {
+        eventually(null, condition, 5000, 10, MILLISECONDS);
+    }
+
+    public static void eventually(Supplier<String> message, BooleanSupplier condition) {
+        eventually(message, condition, 5000, 10, MILLISECONDS);
+    }
+
+    public static void eventually(Supplier<String> message, BooleanSupplier condition, long timeout,
+                                  long pollInterval, TimeUnit unit) {
+        if (pollInterval <= 0) {
+            throw new IllegalArgumentException("Check interval must be positive");
+        }
+        if (message == null) {
+            message = () -> null;
+        }
+        try {
+            long expectedEndTime = System.nanoTime() + TimeUnit.NANOSECONDS.convert(timeout, unit);
+            long sleepMillis = MILLISECONDS.convert(pollInterval, unit);
+            do {
+                if (condition.getAsBoolean()) return;
+
+                Thread.sleep(sleepMillis);
+            } while (expectedEndTime - System.nanoTime() > 0);
+
+        } catch (Exception e) {
+            throw new RuntimeException("Unexpected!", e);
+        }
+        // last check
+        Assert.assertTrue(message.get(), condition.getAsBoolean());
+    }
 }

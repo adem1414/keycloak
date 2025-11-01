@@ -33,7 +33,7 @@ import org.w3c.dom.Element;
 import javax.security.auth.login.LoginException;
 import javax.xml.crypto.dsig.XMLSignatureException;
 import javax.xml.stream.Location;
-import javax.xml.ws.WebServiceException;
+import jakarta.xml.ws.WebServiceException;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 
@@ -291,10 +291,12 @@ public interface PicketLinkLogger {
     /**
      * @param tag
      * @param foundElementTag
+     * @param line
+     * @param column
      *
      * @return
      */
-    RuntimeException parserExpectedTag(String tag, String foundElementTag);
+    RuntimeException parserExpectedTag(String tag, String foundElementTag, Integer line, Integer column);
 
     /**
      * @param ns

@@ -16,10 +16,13 @@
  */
 package org.keycloak.authentication.actiontoken.execactions;
 
+import org.keycloak.TokenVerifier;
 import org.keycloak.TokenVerifier.Predicate;
+import org.keycloak.authentication.AuthenticationProcessor;
 import org.keycloak.authentication.RequiredActionFactory;
 import org.keycloak.authentication.RequiredActionProvider;
 import org.keycloak.authentication.actiontoken.*;
+import org.keycloak.authentication.requiredactions.util.RequiredActionsValidator;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventType;
 import org.keycloak.forms.login.LoginFormsProvider;
@@ -32,9 +35,11 @@ import org.keycloak.services.messages.Messages;
 import org.keycloak.sessions.AuthenticationSessionCompoundId;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import java.util.Objects;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriBuilder;
-import javax.ws.rs.core.UriInfo;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.core.UriInfo;
+
+import static org.keycloak.models.utils.DefaultRequiredActions.getDefaultRequiredActionCaseInsensitively;
 
 /**
  *
@@ -64,7 +69,8 @@ public class ExecuteActionsActionTokenHandler extends AbstractActionTokenHandler
             Messages.INVALID_REDIRECT_URI
           ),
 
-          verifyEmail(tokenContext)
+          verifyEmail(tokenContext),
+          verifyRequiredActions(tokenContext)
         );
     }
 
@@ -79,11 +85,12 @@ public class ExecuteActionsActionTokenHandler extends AbstractActionTokenHandler
             String authSessionEncodedId = AuthenticationSessionCompoundId.fromAuthSession(authSession).getEncodedId();
             token.setCompoundAuthenticationSessionId(authSessionEncodedId);
             UriBuilder builder = Urls.actionTokenBuilder(uriInfo.getBaseUri(), token.serialize(session, realm, uriInfo),
-                    authSession.getClient().getClientId(), authSession.getTabId());
+                    authSession.getClient().getClientId(), authSession.getTabId(), AuthenticationProcessor.getClientData(session, authSession));
             String confirmUri = builder.build(realm.getName()).toString();
 
             return session.getProvider(LoginFormsProvider.class)
                     .setAuthenticationSession(authSession)
+                    .setUser(authSession.getAuthenticatedUser())
                     .setSuccess(Messages.CONFIRM_EXECUTION_OF_ACTIONS)
                     .setAttribute(Constants.TEMPLATE_ATTR_ACTION_URI, confirmUri)
                     .setAttribute(Constants.TEMPLATE_ATTR_REQUIRED_ACTIONS, token.getRequiredActions())
@@ -115,17 +122,22 @@ public class ExecuteActionsActionTokenHandler extends AbstractActionTokenHandler
         KeycloakSessionFactory sessionFactory = tokenContext.getSession().getKeycloakSessionFactory();
 
         return token.getRequiredActions().stream()
-          .map(actionName -> realm.getRequiredActionProviderByAlias(actionName))    // get realm-specific model from action name and filter out irrelevant
+          .map(realm::getRequiredActionProviderByAlias)    // get realm-specific model from action name and filter out irrelevant
           .filter(Objects::nonNull)
           .filter(RequiredActionProviderModel::isEnabled)
 
           .map(RequiredActionProviderModel::getProviderId)      // get provider ID from model
 
-          .map(providerId -> (RequiredActionFactory) sessionFactory.getProviderFactory(RequiredActionProvider.class, providerId))
+          .map(providerId -> (RequiredActionFactory) sessionFactory.getProviderFactory(RequiredActionProvider.class, getDefaultRequiredActionCaseInsensitively(providerId)))
           .filter(Objects::nonNull)
 
           .noneMatch(RequiredActionFactory::isOneTimeAction);
     }
 
-
+    // Verify required actions included in the token are valid
+    protected TokenVerifier.Predicate<ExecuteActionsActionToken> verifyRequiredActions(ActionTokenContext<ExecuteActionsActionToken> tokenContext) {
+        return TokenUtils.checkThat(t -> RequiredActionsValidator.validRequiredActions(tokenContext.getSession(), t.getRequiredActions()),
+                Errors.RESOLVE_REQUIRED_ACTIONS, Messages.INVALID_TOKEN_REQUIRED_ACTIONS
+        );
+    }
 }

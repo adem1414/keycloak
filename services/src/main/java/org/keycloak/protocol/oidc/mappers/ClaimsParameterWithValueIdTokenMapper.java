@@ -32,7 +32,6 @@ import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.representations.ClaimsRepresentation;
 import org.keycloak.representations.IDToken;
-import org.keycloak.services.clientpolicy.executor.IntentClientBindCheckExecutor;
 import org.keycloak.util.JsonSerialization;
 import org.keycloak.util.TokenUtil;
 
@@ -123,7 +122,7 @@ public class ClaimsParameterWithValueIdTokenMapper extends AbstractOIDCProtocolM
         }
 
         HardcodedClaim hardcodedClaimMapper = new HardcodedClaim();
-        hardcodedClaimMapper.setClaim(token, HardcodedClaim.create("hard", claimName, claim, "String", false, true), userSession);
+        hardcodedClaimMapper.setClaim(token, HardcodedClaim.create("hard", claimName, claim, "String", false, true, false), userSession);
     }
 
     public static ProtocolMapperModel createMapper(String name, String attributeValue, boolean idToken) {

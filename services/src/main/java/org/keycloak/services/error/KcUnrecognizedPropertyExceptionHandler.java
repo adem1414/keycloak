@@ -20,27 +20,35 @@ package org.keycloak.services.error;
 
 import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
 
-import javax.ws.rs.BadRequestException;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.ext.ExceptionMapper;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.ext.ExceptionMapper;
+import jakarta.ws.rs.ext.Provider;
+
+import org.keycloak.models.KeycloakSession;
 
 /**
  * Override explicitly added ExceptionMapper for handling <code>UnrecognizedPropertyException</code> in RestEasy Jackson
  *
  * <code>org.jboss.resteasy.plugins.providers.jackson.UnrecognizedPropertyExceptionHandler</code>
  */
+@Provider
 public class KcUnrecognizedPropertyExceptionHandler implements ExceptionMapper<UnrecognizedPropertyException> {
 
     @Context
-    private HttpHeaders headers;
+    KeycloakSession session;
 
     /**
      * Return escaped original message
+     * @param exception Exception to map
+     * @return The response with the error
      */
     @Override
     public Response toResponse(UnrecognizedPropertyException exception) {
-        return KeycloakErrorHandler.getResponse(headers, new BadRequestException(exception.getMessage()));
+        final String message = String.format("Invalid json representation for %s. Unrecognized field \"%s\" at line %s column %s.",
+                exception.getReferringClass().getSimpleName(), exception.getPropertyName(),
+                exception.getLocation().getLineNr(), exception.getLocation().getColumnNr());
+        return KeycloakErrorHandler.getResponse(session, new BadRequestException(message));
     }
 }

@@ -37,7 +37,7 @@ public class SAMLEncryptionMethodParser extends AbstractStaxSamlMetadataParser<E
             case KEY_SIZE:
                 {
                     StaxParserUtil.advance(xmlEventReader);
-                    BigInteger keySize = BigInteger.valueOf(Long.valueOf(StaxParserUtil.getElementText(xmlEventReader)));
+                    BigInteger keySize = BigInteger.valueOf(Long.parseLong(StaxParserUtil.getElementText(xmlEventReader)));
 
                     EncryptionMethodType.EncryptionMethod encMethod = target.getEncryptionMethod();
                     if (encMethod == null) {
@@ -64,7 +64,15 @@ public class SAMLEncryptionMethodParser extends AbstractStaxSamlMetadataParser<E
                 break;
 
             default:
-                throw LOGGER.parserUnknownTag(StaxParserUtil.getElementName(elementDetail), elementDetail.getLocation());
+                {
+                    EncryptionMethodType.EncryptionMethod encMethod = target.getEncryptionMethod();
+                    if (encMethod == null) {
+                        encMethod = new EncryptionMethodType.EncryptionMethod();
+                        target.setEncryptionMethod(encMethod);
+                    }
+                    encMethod.addAny(StaxParserUtil.getDOMElement(xmlEventReader));
+                }
+
         }
     }
 }

@@ -2,24 +2,47 @@ version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    open-pull-requests-limit: 999
-    rebase-strategy: disabled
     schedule:
       interval: weekly
-      day: saturday
+      day: "sunday"
+      time: "03:00"
+      timezone: Etc/GMT
+    open-pull-requests-limit: 10 # It's wise to keep this low even with grouping
+    rebase-strategy: disabled
     labels:
       - area/dependencies
       - area/ci
+    groups:
+      actions-dependencies: # This name will be used in the PR title
+        patterns:
+          - "*"
+
   - package-ecosystem: npm
-    directory: /themes/src/main/resources/theme/keycloak/common/resources
+    directory: js
     schedule:
       interval: weekly
-      day: saturday
-    open-pull-requests-limit: 999
+      day: "thursday"
+      time: "03:00"
+      timezone: Etc/GMT
+    open-pull-requests-limit: 10 # It's wise to keep this low even with grouping
     rebase-strategy: disabled
     labels:
       - area/dependencies
-      - area/admin/ui
+      - team/ui
     ignore:
-      - dependency-name: bootstrap
+      - dependency-name: "@patternfly/*"
         update-types: ["version-update:semver-major"]
+      - dependency-name: react
+        update-types: ["version-update:semver-major"]
+      - dependency-name: react-dom
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-router-dom"
+        update-types: ["version-update:semver-major"]
+    groups:
+      npm-dependencies: # This name will be used in the PR title
+        patterns:
+          - "*"

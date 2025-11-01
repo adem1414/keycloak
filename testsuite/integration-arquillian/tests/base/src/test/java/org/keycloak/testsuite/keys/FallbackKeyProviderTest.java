@@ -18,30 +18,25 @@
 package org.keycloak.testsuite.keys;
 
 import org.jboss.arquillian.graphene.page.Page;
-import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
-import org.keycloak.OAuth2Constants;
-import org.keycloak.TokenVerifier;
 import org.keycloak.crypto.Algorithm;
-import org.keycloak.representations.AccessToken;
+import org.keycloak.models.Constants;
 import org.keycloak.representations.idm.ComponentRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.testsuite.AbstractKeycloakTest;
+import org.keycloak.testsuite.Assert;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.pages.LoginPage;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
 
 import java.util.LinkedList;
 import java.util.List;
 
-import static org.hamcrest.collection.IsCollectionWithSize.hasSize;
-import static org.hamcrest.collection.IsIterableContainingInAnyOrder.containsInAnyOrder;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertThat;
-import static org.keycloak.testsuite.admin.AbstractAdminTest.loadJson;
+import static org.keycloak.testsuite.AbstractAdminTest.loadJson;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -68,7 +63,7 @@ public class FallbackKeyProviderTest extends AbstractKeycloakTest {
         String realmId = realmsResouce().realm("test").toRepresentation().getId();
 
         List<ComponentRepresentation> providers = realmsResouce().realm("test").components().query(realmId, "org.keycloak.keys.KeyProvider");
-        assertEquals(3, providers.size());
+        assertEquals(4, providers.size());
 
         for (ComponentRepresentation p : providers) {
             realmsResouce().realm("test").components().component(p.getId()).remove();
@@ -78,15 +73,15 @@ public class FallbackKeyProviderTest extends AbstractKeycloakTest {
         assertEquals(0, providers.size());
 
         oauth.doLogin("test-user@localhost", "password");
-        String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
-        OAuthClient.AccessTokenResponse response = oauth.doAccessTokenRequest(code, "password");
+        String code = oauth.parseLoginResponse().getCode();
+        AccessTokenResponse response = oauth.doAccessTokenRequest(code);
 
         assertNotNull(response.getAccessToken());
 
         Assert.assertEquals(AppPage.RequestType.AUTH_RESPONSE, appPage.getRequestType());
 
         providers = realmsResouce().realm("test").components().query(realmId, "org.keycloak.keys.KeyProvider");
-        assertProviders(providers, "fallback-RS256", "fallback-HS256");
+        assertProviders(providers, "fallback-RS256", "fallback-AES", "fallback-" + Constants.INTERNAL_SIGNATURE_ALGORITHM);
     }
 
     @Test
@@ -113,16 +108,17 @@ public class FallbackKeyProviderTest extends AbstractKeycloakTest {
 
             oauth.openLoginForm();
 
-            String code = oauth.getCurrentQuery().get(OAuth2Constants.CODE);
-            OAuthClient.AccessTokenResponse response = oauth.doAccessTokenRequest(code, "password");
+            String code = oauth.parseLoginResponse().getCode();
+            AccessTokenResponse response = oauth.doAccessTokenRequest(code);
             assertNotNull(response.getAccessToken());
         }
 
         List<ComponentRepresentation> providers = realmsResouce().realm("test").components().query(realmId, "org.keycloak.keys.KeyProvider");
 
         List<String> expected = new LinkedList<>();
-        expected.add("rsa");
-        expected.add("hmac-generated");
+        expected.add("rsa-generated");
+        expected.add("rsa-enc-generated");
+        expected.add("hmac-generated-hs512");
         expected.add("aes-generated");
 
         for (String a : algorithmsToTest) {
@@ -138,13 +134,7 @@ public class FallbackKeyProviderTest extends AbstractKeycloakTest {
     }
 
     private void assertProviders(List<ComponentRepresentation> providers, String... expected) {
-        List<String> names = new LinkedList<>();
-        for (ComponentRepresentation p : providers) {
-            names.add(p.getName());
-        }
-
-        assertThat(names, hasSize(expected.length));
-        assertThat(names, containsInAnyOrder(expected));
+        Assert.assertNames(providers, expected);
     }
 }
 

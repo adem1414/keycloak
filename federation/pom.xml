@@ -22,7 +22,7 @@
     <parent>
         <artifactId>keycloak-parent</artifactId>
         <groupId>org.keycloak</groupId>
-        <version>999-SNAPSHOT</version>
+        <version>999.0.0-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <modelVersion>4.0.0</modelVersion>
@@ -30,12 +30,13 @@
 
     <artifactId>keycloak-federation-parent</artifactId>
     <name>Keycloak Federation</name>
-    <description />
+    <description>Keycloak Federation Parent</description>
 
     <modules>
         <module>kerberos</module>
         <module>ldap</module>
         <module>sssd</module>
+        <module>ipatuura</module>
     </modules>
 
 </project>

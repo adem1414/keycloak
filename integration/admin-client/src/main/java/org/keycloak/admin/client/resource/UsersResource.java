@@ -19,16 +19,16 @@ package org.keycloak.admin.client.resource;
 
 import org.keycloak.representations.idm.UserRepresentation;
 
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.util.List;
 
 public interface UsersResource {
@@ -117,9 +117,25 @@ public interface UsersResource {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @Consumes(MediaType.APPLICATION_JSON)
+    List<UserRepresentation> searchByAttributes(@QueryParam("q") String searchQuery,
+                                                @QueryParam("exact") Boolean exact);
+
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
     List<UserRepresentation> searchByAttributes(@QueryParam("first") Integer firstResult,
                                                 @QueryParam("max") Integer maxResults,
                                                 @QueryParam("enabled") Boolean enabled,
+                                                @QueryParam("briefRepresentation") Boolean briefRepresentation,
+                                                @QueryParam("q") String searchQuery);
+
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    @Consumes(MediaType.APPLICATION_JSON)
+    List<UserRepresentation> searchByAttributes(@QueryParam("first") Integer firstResult,
+                                                @QueryParam("max") Integer maxResults,
+                                                @QueryParam("enabled") Boolean enabled,
+                                                @QueryParam("exact") Boolean exact,
                                                 @QueryParam("briefRepresentation") Boolean briefRepresentation,
                                                 @QueryParam("q") String searchQuery);
 
@@ -181,7 +197,7 @@ public interface UsersResource {
      *
      * @param search the value to search. It can be the username, email or any of the supported options to query based on user attributes
      * @param firstResult the position of the first result to retrieve
-     * @param maxResults the maximum number of results to retreive
+     * @param maxResults the maximum number of results to retrieve
      * @return a list of {@link UserRepresentation}
      */
     @GET
@@ -200,7 +216,7 @@ public interface UsersResource {
      *
      * @param search the value to search. It can be the username, email or any of the supported options to query based on user attributes
      * @param firstResult the position of the first result to retrieve
-     * @param maxResults the maximum number of results to retreive
+     * @param maxResults the maximum number of results to retrieve
      * @param briefRepresentation Only return basic information (only guaranteed to return id, username, created, first and last name,
      *      email, enabled state, email verification state, federation link, and access.
      *      Note that it means that namely user attributes, required actions, and not before are not returned.)
@@ -212,6 +228,50 @@ public interface UsersResource {
                                     @QueryParam("first") Integer firstResult,
                                     @QueryParam("max") Integer maxResults,
                                     @QueryParam("briefRepresentation") Boolean briefRepresentation);
+
+    /**
+     * Search for users whose username, first or last name or email matches the value provided by {@code search}. The {@code search}
+     * argument also allows finding users by specific attributes as follows:
+     *
+     * <ul>
+     *     <li><i>id:</i> - Find users by identifier. For instance, <i>id:aa497859-bbf5-44ac-bf1a-74dbffcaf197</i></li>
+     * </ul>
+     *
+     * @param search the value to search. It can be the username, email or any of the supported options to query based on user attributes
+     * @param enabled if true, only users that are enabled are returned
+     * @param firstResult the position of the first result to retrieve
+     * @param maxResults the maximum number of results to retrieve
+     * @return a list of {@link UserRepresentation}
+     */
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    List<UserRepresentation> search(@QueryParam("search") String search,
+      @QueryParam("enabled") Boolean enabled,
+      @QueryParam("first") Integer firstResult,
+      @QueryParam("max") Integer maxResults);
+
+    /**
+     * Returns the users that can be viewed and match the given filters.
+     *
+     * @param search        arbitrary search string for all the fields below
+     * @param last          last name field of a user
+     * @param first         first name field of a user
+     * @param email         email field of a user
+     * @param emailVerified emailVerified field of a user
+     * @param username      username field of a user
+     * @param enabled       Boolean representing if user is enabled or not
+     * @return the list of users matching the given filters
+     */
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    List<UserRepresentation> search(@QueryParam("search") String search,
+                  @QueryParam("lastName") String last,
+                  @QueryParam("firstName") String first,
+                  @QueryParam("email") String email,
+                  @QueryParam("emailVerified") Boolean emailVerified,
+                  @QueryParam("username") String username,
+                  @QueryParam("enabled") Boolean enabled,
+                  @QueryParam("q") String searchQuery);
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
@@ -308,7 +368,37 @@ public interface UsersResource {
                   @QueryParam("email") String email,
                   @QueryParam("emailVerified") Boolean emailVerified,
                   @QueryParam("username") String username,
-                  @QueryParam("enabled") Boolean enabled);
+                  @QueryParam("enabled") Boolean enabled,
+                  @QueryParam("q") String searchQuery);
+
+    /**
+     * Returns the number of users that can be viewed and match the given filters.
+     * If none of the filters is specified this is equivalent to {{@link #count()}}.
+     *
+     * @param search        arbitrary search string for all the fields below
+     * @param last          last name field of a user
+     * @param first         first name field of a user
+     * @param email         email field of a user
+     * @param emailVerified emailVerified field of a user
+     * @param username      username field of a user
+     * @param enabled       Boolean representing if user is enabled or not
+     * @param idpAlias The alias of an Identity Provider linked to the user. Parameter supported since Keycloak server 26.4.0
+     * @param idpUserId The userId at an Identity Provider linked to the user. Parameter supported since Keycloak server 26.4.0
+     * @return number of users matching the given filters
+     */
+    @Path("count")
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    Integer count(@QueryParam("search") String search,
+                  @QueryParam("lastName") String last,
+                  @QueryParam("firstName") String first,
+                  @QueryParam("email") String email,
+                  @QueryParam("emailVerified") Boolean emailVerified,
+                  @QueryParam("username") String username,
+                  @QueryParam("enabled") Boolean enabled,
+                  @QueryParam("idpAlias") String idpAlias,
+                  @QueryParam("idpUserId") String idpUserId,
+                  @QueryParam("q") String searchQuery);
 
     /**
      * Returns the number of users with the given status for emailVerified.

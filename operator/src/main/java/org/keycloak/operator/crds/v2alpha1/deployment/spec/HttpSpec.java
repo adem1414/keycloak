@@ -17,13 +17,23 @@
 
 package org.keycloak.operator.crds.v2alpha1.deployment.spec;
 
-import com.fasterxml.jackson.annotation.JsonPropertyDescription;
-import io.sundr.builder.annotations.Buildable;
+import java.util.Optional;
+import java.util.Map;
+
 import org.keycloak.operator.Constants;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
+
+import io.sundr.builder.annotations.Buildable;
+import org.keycloak.operator.crds.v2alpha1.CRDUtils;
+import org.keycloak.operator.crds.v2alpha1.deployment.Keycloak;
+import org.keycloak.operator.crds.v2alpha1.deployment.KeycloakSpec;
 
 /**
  * @author Vaclav Muzikar <vmuzikar@redhat.com>
  */
+@JsonInclude(JsonInclude.Include.NON_NULL)
 @Buildable(editableEnabled = false, builderPackage = "io.fabric8.kubernetes.api.builder")
 public class HttpSpec {
     @JsonPropertyDescription("A secret containing the TLS configuration for HTTPS. Reference: https://kubernetes.io/docs/concepts/configuration/secret/#tls-secrets.")
@@ -37,6 +47,12 @@ public class HttpSpec {
 
     @JsonPropertyDescription("The used HTTPS port.")
     private Integer httpsPort = Constants.KEYCLOAK_HTTPS_PORT;
+
+    @JsonPropertyDescription("Annotations to be appended to the Service object")
+    Map<String, String> annotations;
+
+    @JsonPropertyDescription("Labels to be appended to the Service object")
+    Map<String, String> labels;
 
     public String getTlsSecret() {
         return tlsSecret;
@@ -69,4 +85,39 @@ public class HttpSpec {
     public void setHttpsPort(Integer httpsPort) {
         this.httpsPort = httpsPort;
     }
+
+
+    public static int httpPort(Keycloak keycloak) {
+        return httpSpec(keycloak)
+                .map(HttpSpec::getHttpPort)
+                .orElse(Constants.KEYCLOAK_HTTP_PORT);
+    }
+
+    public static int httpsPort(Keycloak keycloak) {
+        return httpSpec(keycloak)
+                .map(HttpSpec::getHttpsPort)
+                .orElse(Constants.KEYCLOAK_HTTPS_PORT);
+    }
+
+    private static Optional<HttpSpec> httpSpec(Keycloak keycloak) {
+        return CRDUtils.keycloakSpecOf(keycloak)
+                .map(KeycloakSpec::getHttpSpec);
+    }
+
+    public Map<String, String> getAnnotations() {
+        return annotations;
+    }
+
+    public void setAnnotations(Map<String, String> annotations) {
+        this.annotations = annotations;
+    }
+
+    public Map<String, String> getLabels() {
+        return labels;
+    }
+
+    public void setLabels(Map<String, String> labels) {
+        this.labels = labels;
+    }
+    
 }

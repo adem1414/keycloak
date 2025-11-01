@@ -18,6 +18,8 @@ package org.keycloak.testsuite.arquillian;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -50,6 +52,7 @@ public final class TestContext {
     private Keycloak adminClient;
     private KeycloakTestingClient testingClient;
     private List<RealmRepresentation> testRealmReps = new ArrayList<>();
+    private Map<String, String> userPasswords = new HashMap<>();
 
     // Track if particular test was initialized. What exactly means "initialized" is test dependent (Eg. some user in @Before method was created, so we can set initialized to true
     // to avoid creating user when @Before method is executed for 2nd time)
@@ -57,6 +60,8 @@ public final class TestContext {
 
     // Key is realmName, value are objects to clean after the test method
     private final Map<String, TestCleanup> cleanups = new ConcurrentHashMap<>();
+
+    private final Set<Runnable> afterClassActions = new HashSet<>();
 
     public TestContext(SuiteContext suiteContext, Class testClass) {
         this.suiteContext = suiteContext;
@@ -176,6 +181,14 @@ public final class TestContext {
         this.testRealmReps.addAll(testRealmReps);
     }
 
+    public Map<String, String> getUserPasswords() {
+        return userPasswords;
+    }
+
+    public void setUserPasswords(Map<String, String> userPasswords) {
+        this.userPasswords = userPasswords;
+    }
+
     public boolean isInitialized() {
         return initialized;
     }
@@ -201,6 +214,14 @@ public final class TestContext {
         return cleanups;
     }
 
+    public void registerAfterClassAction(Runnable afterClassAction) {
+        afterClassActions.add(afterClassAction);
+    }
+
+    public void runAfterClassActions() {
+        afterClassActions.forEach(Runnable::run);
+        afterClassActions.clear();
+    }
 
     public String getAppServerContainerName() {
         if (isAdapterContainerEnabled()) { //standalone app server

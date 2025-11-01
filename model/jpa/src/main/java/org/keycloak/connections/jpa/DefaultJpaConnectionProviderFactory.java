@@ -28,6 +28,7 @@ import org.keycloak.Config;
 import org.keycloak.ServerStartupError;
 import org.keycloak.common.util.StackUtil;
 import org.keycloak.common.util.StringPropertyReplacer;
+import org.keycloak.connections.jpa.support.EntityManagerProxy;
 import org.keycloak.connections.jpa.updater.JpaUpdaterProvider;
 import org.keycloak.connections.jpa.updater.liquibase.LiquibaseJpaUpdaterProviderFactory;
 import org.keycloak.connections.jpa.util.JpaUtils;
@@ -43,12 +44,12 @@ import org.keycloak.timer.TimerProvider;
 import org.keycloak.transaction.JtaTransactionManagerLookup;
 
 import javax.naming.InitialContext;
-import javax.persistence.EntityManager;
-import javax.persistence.EntityManagerFactory;
-import javax.persistence.SynchronizationType;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import jakarta.persistence.SynchronizationType;
 import javax.sql.DataSource;
-import javax.transaction.TransactionManager;
-import javax.transaction.UserTransaction;
+import jakarta.transaction.TransactionManager;
+import jakarta.transaction.UserTransaction;
 import java.io.File;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -59,6 +60,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import liquibase.GlobalConfiguration;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -87,10 +89,10 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
         logger.trace("Create JpaConnectionProvider");
         lazyInit(session);
 
-        return new DefaultJpaConnectionProvider(createEntityManager(session));
+        return new DefaultJpaConnectionProvider(createEntityManager(session, true));
     }
 
-    private EntityManager createEntityManager(KeycloakSession session) {
+    private EntityManager createEntityManager(KeycloakSession session, boolean sessionManaged) {
         EntityManager em;
         if (!jtaEnabled) {
             logger.trace("enlisting EntityManager in JpaKeycloakTransaction");
@@ -99,7 +101,7 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
 
             em = emf.createEntityManager(SynchronizationType.SYNCHRONIZED);
         }
-        em = PersistenceExceptionConverter.create(session, em);
+        em = EntityManagerProxy.create(session, em, sessionManaged);
         if (!jtaEnabled) {
             session.getTransactionManager().enlist(new JpaKeycloakTransaction(em));
         }
@@ -109,7 +111,7 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
     private void addSpecificNamedQueries(KeycloakSession session, Connection connection) {
         EntityManager em = null;
         try {
-            em = createEntityManager(session);
+            em = createEntityManager(session, false);
             String dbKind = getDatabaseType(connection.getMetaData().getDatabaseProductName());
             for (Map.Entry<Object, Object> query : loadSpecificNamedQueries(dbKind.toLowerCase()).entrySet()) {
                 String queryName = query.getKey().toString();
@@ -170,26 +172,24 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
                         String dataSource = config.get("dataSource");
                         if (dataSource != null) {
                             if (config.getBoolean("jta", jtaEnabled)) {
-                                properties.put(AvailableSettings.JPA_JTA_DATASOURCE, dataSource);
+                                properties.put(AvailableSettings.JAKARTA_JTA_DATASOURCE, dataSource);
                             } else {
-                                properties.put(AvailableSettings.JPA_NON_JTA_DATASOURCE, dataSource);
+                                properties.put(AvailableSettings.JAKARTA_NON_JTA_DATASOURCE, dataSource);
                             }
                         } else {
                             String url = config.get("url");
                             String driver = config.get("driver");
-                            if (driver.equals("org.h2.Driver")) {
-                                url = addH2NonKeywords(url);
-                            }
-                            properties.put(AvailableSettings.JPA_JDBC_URL, url);
-                            properties.put(AvailableSettings.JPA_JDBC_DRIVER, driver);
+                            url = augmentJdbcUrl(driver, url);
+                            properties.put(AvailableSettings.JAKARTA_JDBC_URL, url);
+                            properties.put(AvailableSettings.JAKARTA_JDBC_DRIVER, driver);
 
                             String user = config.get("user");
                             if (user != null) {
-                                properties.put(AvailableSettings.JPA_JDBC_USER, user);
+                                properties.put(AvailableSettings.JAKARTA_JDBC_USER, user);
                             }
                             String password = config.get("password");
                             if (password != null) {
-                                properties.put(AvailableSettings.JPA_JDBC_PASSWORD, password);
+                                properties.put(AvailableSettings.JAKARTA_JDBC_PASSWORD, password);
                             }
                         }
 
@@ -209,8 +209,9 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
                         try {
                             prepareOperationalInfo(connection);
 
-                            String driverDialect = detectDialect(connection);
-                            if (driverDialect != null) {
+                            String driverDialect = config.get("driverDialect");
+                            // use configured dialect, else rely on Hibernate detection
+                            if (driverDialect != null && !driverDialect.isBlank()) {
                                 properties.put("hibernate.dialect", driverDialect);
                             }
 
@@ -250,17 +251,8 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
                                 startGlobalStats(session, globalStatsInterval);
                             }
 
-                            /*
-                             * Migrate model is executed just in case following providers are "jpa".
-                             * In Map Storage, there is an assumption that migrateModel is not needed.
-                             */
-                            if ((Config.getProvider("realm") == null || "jpa".equals(Config.getProvider("realm"))) &&
-                                (Config.getProvider("client") == null || "jpa".equals(Config.getProvider("client"))) &&
-                                (Config.getProvider("clientScope") == null || "jpa".equals(Config.getProvider("clientScope")))) {
-
-                                logger.debug("Calling migrateModel");
-                                migrateModel(session);
-                            }
+                            logger.debug("Calling migrateModel");
+                            migrateModel(session);
                         } finally {
                             // Close after creating EntityManagerFactory to prevent in-mem databases from closing
                             if (connection != null) {
@@ -297,51 +289,10 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
         }
     }
 
-
-    protected String detectDialect(Connection connection) {
-        String driverDialect = config.get("driverDialect");
-        if (driverDialect != null && driverDialect.length() > 0) {
-            return driverDialect;
-        } else {
-            try {
-                String dbProductName = connection.getMetaData().getDatabaseProductName();
-                String dbProductVersion = connection.getMetaData().getDatabaseProductVersion();
-
-                // For MSSQL2014, we may need to fix the autodetected dialect by hibernate
-                if (dbProductName.equals("Microsoft SQL Server")) {
-                    String topVersionStr = dbProductVersion.split("\\.")[0];
-                    boolean shouldSet2012Dialect = true;
-                    try {
-                        int topVersion = Integer.parseInt(topVersionStr);
-                        if (topVersion < 12) {
-                            shouldSet2012Dialect = false;
-                        }
-                    } catch (NumberFormatException nfe) {
-                    }
-                    if (shouldSet2012Dialect) {
-                        String sql2012Dialect = "org.hibernate.dialect.SQLServer2012Dialect";
-                        logger.debugf("Manually override hibernate dialect to %s", sql2012Dialect);
-                        return sql2012Dialect;
-                    }
-                }
-
-                // For Oracle19c, we may need to set dialect explicitly to workaround https://hibernate.atlassian.net/browse/HHH-13184
-                if (dbProductName.equals("Oracle") && connection.getMetaData().getDatabaseMajorVersion() > 12) {
-                    logger.debugf("Manually specify dialect for Oracle to org.hibernate.dialect.Oracle12cDialect");
-                    return "org.hibernate.dialect.Oracle12cDialect";
-                }
-            } catch (SQLException e) {
-                logger.warnf("Unable to detect hibernate dialect due database exception : %s", e.getMessage());
-            }
-
-            return null;
-        }
-    }
-
     protected void startGlobalStats(KeycloakSession session, int globalStatsIntervalSecs) {
         logger.debugf("Started Hibernate statistics with the interval %s seconds", globalStatsIntervalSecs);
         TimerProvider timer = session.getProvider(TimerProvider.class);
-        timer.scheduleTask(new HibernateStatsReporter(emf), globalStatsIntervalSecs * 1000, "ReportHibernateGlobalStats");
+        timer.scheduleTask(new HibernateStatsReporter(emf), globalStatsIntervalSecs * 1000);
     }
 
     void migration(MigrationStrategy strategy, boolean initializeEmpty, String schema, File databaseUpdateFile, Connection connection, KeycloakSession session) {
@@ -421,20 +372,33 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
             } else {
                 String url = config.get("url");
                 String driver = config.get("driver");
-                if (driver.equals("org.h2.Driver")) {
-                    url = addH2NonKeywords(url);
-                }
+                url = augmentJdbcUrl(driver, url);
                 Class.forName(driver);
-                return DriverManager.getConnection(StringPropertyReplacer.replaceProperties(url, System.getProperties()), config.get("user"), config.get("password"));
+                return DriverManager.getConnection(StringPropertyReplacer.replaceProperties(url, System.getProperties()::getProperty), config.get("user"), config.get("password"));
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to connect to database", e);
         }
     }
 
+    private String augmentJdbcUrl(String driver, String url) {
+        if (driver.equals("org.postgresql.xa.PGXADataSource") || driver.equals("org.postgresql.Driver")) {
+            url = addPostgreSQLKeywords(url);
+        }
+        if (driver.equals("org.h2.Driver")) {
+            url = addH2NonKeywords(url);
+        }
+        return url;
+    }
+
     @Override
     public String getSchema() {
-        return config.get("schema");
+        String schema = config.get("schema");
+        if (schema != null && schema.contains("-") && ! Boolean.parseBoolean(System.getProperty(GlobalConfiguration.PRESERVE_SCHEMA_CASE.getKey()))) {
+            System.setProperty(GlobalConfiguration.PRESERVE_SCHEMA_CASE.getKey(), "true");
+            logger.warnf("The passed schema '%s' contains a dash. Setting liquibase config option PRESERVE_SCHEMA_CASE to true. See https://github.com/keycloak/keycloak/issues/20870 for more information.", schema);
+        }
+        return schema;
     }
 
     @Override
@@ -457,7 +421,15 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
     }
 
     private void migrateModel(KeycloakSession session) {
-        KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), MigrationModelManager::migrate);
+        // Using a lock to prevent concurrent migration in concurrently starting nodes
+        DBLockManager dbLockManager = new DBLockManager(session);
+        DBLockProvider dbLock = dbLockManager.getDBLock();
+        dbLock.waitForLock(DBLockProvider.Namespace.DATABASE);
+        try {
+            KeycloakModelUtils.runJobInTransaction(session.getKeycloakSessionFactory(), MigrationModelManager::migrate);
+        } finally {
+            dbLock.releaseLock();
+        }
     }
 
     /**
@@ -474,6 +446,24 @@ public class DefaultJpaConnectionProviderFactory implements JpaConnectionProvide
     private String addH2NonKeywords(String jdbcUrl) {
         if (!jdbcUrl.contains("NON_KEYWORDS=")) {
             jdbcUrl = jdbcUrl + ";NON_KEYWORDS=VALUE";
+        }
+        return jdbcUrl;
+    }
+
+    /**
+     * For a PostgreSQL cluster, Keycloak would need to connect to the primary node that is writable.
+     * The `targetServerType` should avoid connecting to a reader instance accidentally during node failover.
+
+     * @return JDBC URL with <code>targetServerType=primary</code> appended if the URL doesn't contain <code>targetServerType=</code> yet
+     */
+    private String addPostgreSQLKeywords(String jdbcUrl) {
+        if (!jdbcUrl.contains("targetServerType=")) {
+            if (jdbcUrl.contains("?")) {
+                jdbcUrl = jdbcUrl + "&";
+            } else {
+                jdbcUrl = jdbcUrl + "?";
+            }
+            jdbcUrl = jdbcUrl + "targetServerType=primary";
         }
         return jdbcUrl;
     }

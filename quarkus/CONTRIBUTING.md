@@ -104,7 +104,7 @@ The `kc.sh|bat` script allows you to remotely debug the distribution. For that, 
 kc.sh --debug start-dev
 ```
 
-By default, the debug port is available at `8787`.
+By default, the debug port is available at `8787` on localhost. Additionally, you can specify IPv4 or bracketed IPv6 addresses with optional ports, e.g. `--debug 127.0.0.1:8786`, `--debug [::1]:8785`. Make sure to exercise caution when setting IP addresses in the `--debug` parameter, since a value such as `--debug 0.0.0.0:8787` will expose the debug port to all network interfaces!
 
 An additional environment variable `DEBUG_SUSPEND` can be set to suspend the JVM, when launched in debug mode. The `DEBUG_SUSPEND` variable supports the following values:
 
@@ -144,7 +144,7 @@ The test suite has two main types of tests:
 * `distribution`
 
 The `jvm` tests execute both the test class and server within the same JVM. While the `distribution` tests execute the server
-by running the distribution in a separte JVM.
+by running the distribution in a separate JVM.
 
 The `distribution` tests are marked as such using the `DistributionTest` annotation. If not marked with this annotation, the test is a `JVM` test.
 
@@ -189,6 +189,10 @@ and then execute the following command from the project root directory:
 mvn -f testsuite/integration-arquillian/pom.xml clean install -Pauth-server-quarkus -Dtest=OIDCProtocolMappersTest
 ```
 
+### Resolving DNS names when running tests
+
+In order to avoid using external services for DNS resolution, the tests are executed using a local host file by setting the `-Djdk.net.hosts.file=${project.build.testOutputDirectory}/hosts_file` system property.
+
 ## Documentation
 
 The documentation is a set of guides available from the [docs](../docs/guides/src/main/server) module. Please,
@@ -232,6 +236,10 @@ It is also possible to change to a snapshot version by running:
 ```bash
 ./set-quarkus-version.sh
 ```
+
+After setting the version, please verify that:
+
+* `org.apache.maven` dependencies used by the test suite (and arquillian) are the same from the new Quarkus version 
 
 ### Run a local build
 

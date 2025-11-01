@@ -23,19 +23,21 @@ import org.keycloak.representations.idm.AuthenticationFlowRepresentation;
 import org.keycloak.representations.idm.AuthenticatorConfigInfoRepresentation;
 import org.keycloak.representations.idm.AuthenticatorConfigRepresentation;
 import org.keycloak.representations.idm.ConfigPropertyRepresentation;
+import org.keycloak.representations.idm.RequiredActionConfigInfoRepresentation;
+import org.keycloak.representations.idm.RequiredActionConfigRepresentation;
 import org.keycloak.representations.idm.RequiredActionProviderRepresentation;
 import org.keycloak.representations.idm.RequiredActionProviderSimpleRepresentation;
 
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.util.List;
 import java.util.Map;
 
@@ -86,7 +88,7 @@ public interface AuthenticationManagementResource {
     @Path("/flows/{flowAlias}/copy")
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    Response copy(@PathParam("flowAlias") String flowAlias, Map<String, String> data);
+    Response copy(@PathParam("flowAlias") String flowAlias, Map<String, Object> data);
 
     @Path("/flows/{id}")
     @PUT
@@ -96,12 +98,12 @@ public interface AuthenticationManagementResource {
     @Path("/flows/{flowAlias}/executions/flow")
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    void addExecutionFlow(@PathParam("flowAlias") String flowAlias, Map<String, String> data);
+    void addExecutionFlow(@PathParam("flowAlias") String flowAlias, Map<String, Object> data);
 
     @Path("/flows/{flowAlias}/executions/execution")
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    void addExecution(@PathParam("flowAlias") String flowAlias, Map<String, String> data);
+    void addExecution(@PathParam("flowAlias") String flowAlias, Map<String, Object> data);
 
     @Path("/flows/{flowAlias}/executions")
     @GET
@@ -176,6 +178,59 @@ public interface AuthenticationManagementResource {
     @Path("required-actions/{alias}/lower-priority")
     @POST
     void lowerRequiredActionPriority(@PathParam("alias") String alias);
+
+    /**
+     * Returns configuration description of the specified required action
+     *
+     * @since Keycloak server 25
+     * @param alias Alias of the required action, which configuration description will be returned
+     * @return Configuration description of the required action
+     * @throws jakarta.ws.rs.NotFoundException if the required action of specified alias is not found
+     */
+    @Path("required-actions/{alias}/config-description")
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    RequiredActionConfigInfoRepresentation getRequiredActionConfigDescription(@PathParam("alias") String alias);
+
+    /**
+     * Returns configuration of the specified required action
+     *
+     * @since Keycloak server 25
+     * @param alias Alias of the required action, which configuration will be returned
+     * @return Configuration of the required action
+     * @throws jakarta.ws.rs.BadRequestException if required action not configurable
+     * @throws jakarta.ws.rs.NotFoundException if the required action configuration of specified alias is not found
+     */
+    @Path("required-actions/{alias}/config")
+    @GET
+    @Produces(MediaType.APPLICATION_JSON)
+    RequiredActionConfigRepresentation getRequiredActionConfig(@PathParam("alias") String alias);
+
+    /**
+     * Delete configuration of the specified required action
+     *
+     * @since Keycloak server 25
+     * @param alias Alias of the required action, which will be removed
+     * @throws jakarta.ws.rs.BadRequestException if required action not configurable
+     * @throws jakarta.ws.rs.NotFoundException if the required action configuration of specified alias is not found
+     */
+    @Path("required-actions/{alias}/config")
+    @DELETE
+    void removeRequiredActionConfig(@PathParam("alias") String alias);
+
+    /**
+     * Update configuration of the required action
+     *
+     * @since Keycloak server 25
+     * @param alias Alias of the required action, which will be updated
+     * @param rep JSON representation of the required action
+     * @throws jakarta.ws.rs.BadRequestException if required action not configurable or given configuration is incorrect
+     * @throws jakarta.ws.rs.NotFoundException if the required action configuration of specified alias is not found
+     */
+    @Path("required-actions/{alias}/config")
+    @PUT
+    @Consumes(MediaType.APPLICATION_JSON)
+    void updateRequiredActionConfig(@PathParam("alias") String alias, RequiredActionConfigRepresentation rep);
 
     @Path("config-description/{providerId}")
     @GET

@@ -18,20 +18,22 @@
 package org.keycloak.credential.hash;
 
 import org.keycloak.common.crypto.CryptoIntegration;
-import org.keycloak.common.util.Base64;
+import org.keycloak.common.util.PaddingUtils;
 import org.keycloak.models.PasswordPolicy;
 import org.keycloak.models.credential.PasswordCredentialModel;
 
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
-import java.io.IOException;
 import java.security.NoSuchAlgorithmException;
 import java.security.NoSuchProviderException;
 import java.security.SecureRandom;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.KeySpec;
+import java.util.Base64;
 
 /**
+ * Implementation PBKDF2 password hash algorithm.
+ *
  * @author <a href="mailto:me@tsudot.com">Kunal Kerkar</a>
  */
 public class Pbkdf2PasswordHashProvider implements PasswordHashProvider {
@@ -40,22 +42,25 @@ public class Pbkdf2PasswordHashProvider implements PasswordHashProvider {
 
     private final String pbkdf2Algorithm;
     private final int defaultIterations;
+
+    private final int maxPaddingLength;
     private final int derivedKeySize;
     public static final int DEFAULT_DERIVED_KEY_SIZE = 512;
 
-    public Pbkdf2PasswordHashProvider(String providerId, String pbkdf2Algorithm, int defaultIterations) {
-        this(providerId, pbkdf2Algorithm, defaultIterations, DEFAULT_DERIVED_KEY_SIZE);
+    public Pbkdf2PasswordHashProvider(String providerId, String pbkdf2Algorithm, int defaultIterations, int minPbkdf2PasswordLengthForPadding) {
+        this(providerId, pbkdf2Algorithm, defaultIterations, minPbkdf2PasswordLengthForPadding, DEFAULT_DERIVED_KEY_SIZE);
     }
-    public Pbkdf2PasswordHashProvider(String providerId, String pbkdf2Algorithm, int defaultIterations, int derivedKeySize) {
+    public Pbkdf2PasswordHashProvider(String providerId, String pbkdf2Algorithm, int defaultIterations, int maxPaddingLength, int derivedKeySize) {
         this.providerId = providerId;
         this.pbkdf2Algorithm = pbkdf2Algorithm;
         this.defaultIterations = defaultIterations;
+        this.maxPaddingLength = maxPaddingLength;
         this.derivedKeySize = derivedKeySize;
     }
 
     @Override
     public boolean policyCheck(PasswordPolicy policy, PasswordCredentialModel credential) {
-        int policyHashIterations = policy.getHashIterations();
+        int policyHashIterations = policy != null ? policy.getHashIterations() : -1;
         if (policyHashIterations == -1) {
             policyHashIterations = defaultIterations;
         }
@@ -94,9 +99,9 @@ public class Pbkdf2PasswordHashProvider implements PasswordHashProvider {
 
     private int keySize(PasswordCredentialModel credential) {
         try {
-            byte[] bytes = Base64.decode(credential.getPasswordSecretData().getValue());
+            byte[] bytes = Base64.getDecoder().decode(credential.getPasswordSecretData().getValue());
             return bytes.length * 8;
-        } catch (IOException e) {
+        } catch (IllegalArgumentException e) {
             throw new RuntimeException("Credential could not be decoded", e);
         }
     }
@@ -105,11 +110,12 @@ public class Pbkdf2PasswordHashProvider implements PasswordHashProvider {
     }
 
     private String encodedCredential(String rawPassword, int iterations, byte[] salt, int derivedKeySize) {
-        KeySpec spec = new PBEKeySpec(rawPassword.toCharArray(), salt, iterations, derivedKeySize);
+        String rawPasswordWithPadding = PaddingUtils.padding(rawPassword, maxPaddingLength);
+        KeySpec spec = new PBEKeySpec(rawPasswordWithPadding.toCharArray(), salt, iterations, derivedKeySize);
 
         try {
             byte[] key = getSecretKeyFactory().generateSecret(spec).getEncoded();
-            return Base64.encodeBytes(key);
+            return Base64.getEncoder().encodeToString(key);
         } catch (InvalidKeySpecException e) {
             throw new RuntimeException("Credential could not be encoded", e);
         } catch (Exception e) {
@@ -131,5 +137,9 @@ public class Pbkdf2PasswordHashProvider implements PasswordHashProvider {
         } catch (NoSuchAlgorithmException | NoSuchProviderException e) {
             throw new RuntimeException("PBKDF2 algorithm not found", e);
         }
+    }
+
+    public String getPbkdf2Algorithm() {
+        return pbkdf2Algorithm;
     }
 }

@@ -16,29 +16,19 @@
  */
 package org.keycloak.authentication.authenticators.client;
 
-import org.jboss.logging.Logger;
-import org.keycloak.OAuth2Constants;
+import jakarta.ws.rs.core.Response;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.ClientAuthenticationFlowContext;
-import org.keycloak.common.util.Time;
-import org.keycloak.jose.jws.JWSInput;
+import org.keycloak.crypto.ClientSignatureVerifierProvider;
 import org.keycloak.models.AuthenticationExecutionModel.Requirement;
 import org.keycloak.models.ClientModel;
-import org.keycloak.models.RealmModel;
-import org.keycloak.models.SingleUseObjectProvider;
-import org.keycloak.protocol.oidc.OIDCAdvancedConfigWrapper;
 import org.keycloak.protocol.oidc.OIDCClientSecretConfigWrapper;
 import org.keycloak.protocol.oidc.OIDCConfigAttributes;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
-import org.keycloak.protocol.oidc.OIDCLoginProtocolService;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.representations.JsonWebToken;
 import org.keycloak.services.ServicesLogger;
-import org.keycloak.services.Urls;
 
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -47,6 +37,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.keycloak.models.TokenManager.DEFAULT_VALIDATOR;
+
 /**
  * Client authentication based on JWT signed by client secret instead of private key .
  * See <a href="http://openid.net/specs/openid-connect-core-1_0.html#ClientAuthentication">specs</a> for more details.
@@ -54,153 +46,16 @@ import java.util.Set;
  * This is server side, which verifies JWT from client_assertion parameter, where the assertion was created on adapter side by
  * org.keycloak.adapters.authentication.JWTClientSecretCredentialsProvider
  * <p>
- * TODO: Try to create abstract superclass to be shared with {@link JWTClientAuthenticator}. Most of the code can be reused
  */
 public class JWTClientSecretAuthenticator extends AbstractClientAuthenticator {
-
-    private static final Logger logger = Logger.getLogger(JWTClientSecretAuthenticator.class);
 
     public static final String PROVIDER_ID = "client-secret-jwt";
 
     @Override
     public void authenticateClient(ClientAuthenticationFlowContext context) {
-
-        //KEYCLOAK-19461: Needed for quarkus resteasy implementation throws exception when called with mediaType authentication/json in OpenShiftTokenReviewEndpoint
-        if (!isFormDataRequest(context.getHttpRequest())) {
-            Response challengeResponse = ClientAuthUtil.errorResponse(Response.Status.BAD_REQUEST.getStatusCode(), "invalid_client", "Parameter client_assertion_type is missing");
-            context.challenge(challengeResponse);
-            return;
-        }
-
-        MultivaluedMap<String, String> params = context.getHttpRequest().getDecodedFormParameters();
-
-        String clientAssertionType = params.getFirst(OAuth2Constants.CLIENT_ASSERTION_TYPE);
-        String clientAssertion = params.getFirst(OAuth2Constants.CLIENT_ASSERTION);
-
-        if (clientAssertionType == null) {
-            Response challengeResponse = ClientAuthUtil.errorResponse(Response.Status.BAD_REQUEST.getStatusCode(), "invalid_client", "Parameter client_assertion_type is missing");
-            context.challenge(challengeResponse);
-            return;
-        }
-
-        if (!clientAssertionType.equals(OAuth2Constants.CLIENT_ASSERTION_TYPE_JWT)) {
-            Response challengeResponse = ClientAuthUtil.errorResponse(Response.Status.BAD_REQUEST.getStatusCode(), "invalid_client", "Parameter client_assertion_type has value '"
-                    + clientAssertionType + "' but expected is '" + OAuth2Constants.CLIENT_ASSERTION_TYPE_JWT + "'");
-            context.challenge(challengeResponse);
-            return;
-        }
-
-        if (clientAssertion == null) {
-            Response challengeResponse = ClientAuthUtil.errorResponse(Response.Status.BAD_REQUEST.getStatusCode(), "invalid_client", "client_assertion parameter missing");
-            context.failure(AuthenticationFlowError.INVALID_CLIENT_CREDENTIALS, challengeResponse);
-            return;
-        }
-
         try {
-            JWSInput jws = new JWSInput(clientAssertion);
-            JsonWebToken token = jws.readJsonContent(JsonWebToken.class);
-
-            RealmModel realm = context.getRealm();
-            String clientId = token.getSubject();
-            if (clientId == null) {
-                throw new RuntimeException("Can't identify client. Subject missing on JWT token");
-            }
-
-            if (!clientId.equals(token.getIssuer())) {
-                throw new RuntimeException("Issuer mismatch. The issuer should match the subject");
-            }
-
-            context.getEvent().client(clientId);
-            ClientModel client = realm.getClientByClientId(clientId);
-            if (client == null) {
-                context.failure(AuthenticationFlowError.CLIENT_NOT_FOUND, null);
-                return;
-            } else {
-                context.setClient(client);
-            }
-
-            if (!client.isEnabled()) {
-                context.failure(AuthenticationFlowError.CLIENT_DISABLED, null);
-                return;
-            }
-
-            String expectedSignatureAlg = OIDCAdvancedConfigWrapper.fromClientModel(client).getTokenEndpointAuthSigningAlg();
-            if (jws.getHeader().getAlgorithm() == null || jws.getHeader().getAlgorithm().name() == null) {
-                Response challengeResponse = ClientAuthUtil.errorResponse(Response.Status.BAD_REQUEST.getStatusCode(), "invalid_client", "invalid signature algorithm");
-                context.challenge(challengeResponse);
-                return;
-            }
-
-            String actualSignatureAlg = jws.getHeader().getAlgorithm().name();
-            if (expectedSignatureAlg != null && !expectedSignatureAlg.equals(actualSignatureAlg)) {
-                Response challengeResponse = ClientAuthUtil.errorResponse(Response.Status.BAD_REQUEST.getStatusCode(), "invalid_client", "invalid signature algorithm");
-                context.challenge(challengeResponse);
-                return;
-            }
-
-            String clientSecretString = client.getSecret();
-            if (clientSecretString == null) {
-                context.failure(AuthenticationFlowError.INVALID_CLIENT_CREDENTIALS, null);
-                return;
-            }
-
-            //
-            OIDCClientSecretConfigWrapper wrapper = OIDCClientSecretConfigWrapper.fromClientModel(client);
-            if (wrapper.isClientSecretExpired()) {
-                context.failure(AuthenticationFlowError.INVALID_CLIENT_CREDENTIALS, null);
-                return;
-            }
-            //
-
-            boolean signatureValid;
-            try {
-                JsonWebToken jwt = context.getSession().tokens().decodeClientJWT(clientAssertion, client, JsonWebToken.class);
-                signatureValid = jwt != null;
-                //try authenticate with client rotated secret
-                if (!signatureValid && wrapper.hasRotatedSecret() && !wrapper.isClientRotatedSecretExpired()) {
-                    jwt = context.getSession().tokens().decodeClientJWT(clientAssertion, wrapper.toRotatedClientModel(), JsonWebToken.class);
-                    signatureValid = jwt != null;
-                }
-            } catch (RuntimeException e) {
-                Throwable cause = e.getCause() != null ? e.getCause() : e;
-                throw new RuntimeException("Signature on JWT token by client secret failed validation", cause);
-            }
-            if (!signatureValid) {
-                throw new RuntimeException("Signature on JWT token by client secret  failed validation");
-            }
-            // According to <a href="http://openid.net/specs/openid-connect-core-1_0.html#ClientAuthentication">OIDC's client authentication spec</a>,
-            // JWT contents and verification in client_secret_jwt is the same as in private_key_jwt
-
-            // Allow both "issuer" or "token-endpoint" as audience
-            String issuerUrl = Urls.realmIssuer(context.getUriInfo().getBaseUri(), realm.getName());
-            String tokenUrl = OIDCLoginProtocolService.tokenUrl(context.getUriInfo().getBaseUriBuilder()).build(realm.getName()).toString();
-            if (!token.hasAudience(issuerUrl) && !token.hasAudience(tokenUrl)) {
-                throw new RuntimeException("Token audience doesn't match domain. Realm issuer is '" + issuerUrl + "' but audience from token is '" + Arrays.asList(token.getAudience()).toString() + "'");
-            }
-
-            if (!token.isActive()) {
-                throw new RuntimeException("Token is not active");
-            }
-
-            // KEYCLOAK-2986, token-timeout or token-expiration in keycloak.json might not be used
-            int currentTime = Time.currentTime();
-            if (token.getExpiration() == 0 && token.getIssuedAt() + 10 < currentTime) {
-                throw new RuntimeException("Token is not active");
-            }
-
-            if (token.getId() == null) {
-                throw new RuntimeException("Missing ID on the token");
-            }
-
-            SingleUseObjectProvider singleUseCache = context.getSession().getProvider(SingleUseObjectProvider.class);
-            int lifespanInSecs = Math.max(token.getExpiration() - currentTime, 10);
-            if (singleUseCache.putIfAbsent(token.getId(), lifespanInSecs)) {
-
-                logger.tracef("Added token '%s' to single-use cache. Lifespan: %d seconds, client: %s", token.getId(), lifespanInSecs, clientId);
-            } else {
-                logger.warnf("Token '%s' already used when authenticating client '%s'.", token.getId(), clientId);
-                throw new RuntimeException("Token reuse detected");
-            }
+            JWTClientValidator validator = new JWTClientValidator(context, this::verifySignature, getId());
+            if (!validator.validate()) return;
 
             context.success();
         } catch (Exception e) {
@@ -208,6 +63,53 @@ public class JWTClientSecretAuthenticator extends AbstractClientAuthenticator {
             Response challengeResponse = ClientAuthUtil.errorResponse(Response.Status.BAD_REQUEST.getStatusCode(), "unauthorized_client", "Client authentication with client secret signed JWT failed: " + e.getMessage());
             context.failure(AuthenticationFlowError.INVALID_CLIENT_CREDENTIALS, challengeResponse);
         }
+    }
+
+    public boolean verifySignature(AbstractJWTClientValidator validator) {
+        ClientAuthenticationFlowContext context = validator.getContext();
+        ClientModel client = validator.getClient();
+
+        String clientSecretString = client.getSecret();
+        if (clientSecretString == null) {
+            context.failure(AuthenticationFlowError.INVALID_CLIENT_CREDENTIALS, null);
+            return false;
+        }
+
+        //
+        OIDCClientSecretConfigWrapper wrapper = OIDCClientSecretConfigWrapper.fromClientModel(client);
+        if (wrapper.isClientSecretExpired()) {
+            context.failure(AuthenticationFlowError.INVALID_CLIENT_CREDENTIALS, null);
+            return false;
+        }
+        //
+
+        boolean signatureValid;
+        try {
+            JsonWebToken jwt = context.getSession().tokens().decodeClientJWT(validator.getClientAssertion(), client, (jose, validatedClient) -> {
+                DEFAULT_VALIDATOR.accept(jose, validatedClient);
+                String signatureAlgorithm = jose.getHeader().getRawAlgorithm();
+                ClientSignatureVerifierProvider signatureProvider = context.getSession().getProvider(ClientSignatureVerifierProvider.class, signatureAlgorithm);
+                if (signatureProvider == null) {
+                    throw new RuntimeException("Algorithm not supported");
+                }
+                if (signatureProvider.isAsymmetricAlgorithm()) {
+                    throw new RuntimeException("Algorithm is not symmetric");
+                }
+            }, JsonWebToken.class);
+            signatureValid = jwt != null;
+            //try authenticate with client rotated secret
+            if (!signatureValid && wrapper.hasRotatedSecret() && !wrapper.isClientRotatedSecretExpired()) {
+                jwt = context.getSession().tokens().decodeClientJWT(validator.getClientAssertion(), wrapper.toRotatedClientModel(), JsonWebToken.class);
+                signatureValid = jwt != null;
+            }
+        } catch (Exception e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            throw new RuntimeException("Signature on JWT token by client secret failed validation", cause);
+        }
+        if (!signatureValid) {
+            throw new RuntimeException("Signature on JWT token by client secret  failed validation");
+        }
+        return true;
     }
 
     @Override
@@ -276,7 +178,6 @@ public class JWTClientSecretAuthenticator extends AbstractClientAuthenticator {
     @Override
     public String getHelpText() {
         return "Validates client based on signed JWT issued by client and signed with the Client Secret";
-
     }
 
     @Override

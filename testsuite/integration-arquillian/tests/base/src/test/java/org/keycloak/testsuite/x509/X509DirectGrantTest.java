@@ -20,7 +20,6 @@ package org.keycloak.testsuite.x509;
 
 import org.jboss.arquillian.drone.api.annotation.Drone;
 import org.junit.Assert;
-import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -32,17 +31,17 @@ import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.RefreshToken;
 import org.keycloak.representations.idm.AuthenticatorConfigRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
-import org.keycloak.sessions.AuthenticationSessionProvider;
 import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.util.ContainerAssume;
-import org.keycloak.testsuite.util.OAuthClient;
-import org.keycloak.testsuite.util.PhantomJSBrowser;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+import org.keycloak.testsuite.util.HtmlUnitBrowser;
 import org.openqa.selenium.WebDriver;
 
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.Assert.assertEquals;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.IdentityMapperType.USERNAME_EMAIL;
 import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.IdentityMapperType.USER_ATTRIBUTE;
 import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorConfigModel.MappingSourceType.ISSUERDN;
@@ -57,12 +56,12 @@ import static org.keycloak.authentication.authenticators.x509.X509AuthenticatorC
 public class X509DirectGrantTest extends AbstractX509AuthenticationTest {
 
     @Drone
-    @PhantomJSBrowser
-    private WebDriver phantomJS;
+    @HtmlUnitBrowser
+    private WebDriver htmlUnit;
 
     @Before
     public void replaceTheDefaultDriver() {
-        replaceDefaultWebDriver(phantomJS);
+        replaceDefaultWebDriver(htmlUnit);
     }
 
     @Test
@@ -89,12 +88,12 @@ public class X509DirectGrantTest extends AbstractX509AuthenticationTest {
 
         events.clear();
 
-        oauth.clientId("resource-owner");
-        OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest("secret", "", "", null);
+        oauth.client("resource-owner", "secret");
+        AccessTokenResponse response = oauth.doPasswordGrantRequest("", "");
 
         assertEquals(401, response.getStatusCode());
         assertEquals("invalid_request", response.getError());
-        Assert.assertThat(response.getErrorDescription(), containsString("X509 certificate authentication's failed."));
+        assertThat(response.getErrorDescription(), containsString("X509 certificate authentication's failed."));
     }
 
     @Test
@@ -112,8 +111,8 @@ public class X509DirectGrantTest extends AbstractX509AuthenticationTest {
 
         events.clear();
 
-        oauth.clientId("resource-owner");
-        OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest("secret", "", "", null);
+        oauth.client("resource-owner", "secret");
+        AccessTokenResponse response = oauth.doPasswordGrantRequest("", "");
 
         events.expectLogin()
                 .user((String) null)
@@ -139,12 +138,12 @@ public class X509DirectGrantTest extends AbstractX509AuthenticationTest {
         String cfgId = createConfig(directGrantExecution.getId(), cfg);
         Assert.assertNotNull(cfgId);
 
-        oauth.clientId("resource-owner");
-        OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest("secret", "", "", null);
+        oauth.client("resource-owner", "secret");
+        AccessTokenResponse response = oauth.doPasswordGrantRequest("", "");
 
         assertEquals(401, response.getStatusCode());
         assertEquals("invalid_request", response.getError());
-        Assert.assertThat(response.getErrorDescription(), containsString("Key Usage bit 'dataEncipherment' is not set."));
+        assertThat(response.getErrorDescription(), containsString("Key Usage bit 'dataEncipherment' is not set."));
         events.clear();
     }
 
@@ -156,8 +155,8 @@ public class X509DirectGrantTest extends AbstractX509AuthenticationTest {
         String cfgId = createConfig(directGrantExecution.getId(), cfg);
         Assert.assertNotNull(cfgId);
 
-        oauth.clientId("resource-owner");
-        OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest("secret", "", "", null);
+        oauth.client("resource-owner", "secret");
+        AccessTokenResponse response = oauth.doPasswordGrantRequest("", "");
 
         assertEquals(200, response.getStatusCode());
     }
@@ -171,8 +170,8 @@ public class X509DirectGrantTest extends AbstractX509AuthenticationTest {
         String cfgId = createConfig(directGrantExecution.getId(), cfg);
         Assert.assertNotNull(cfgId);
 
-        oauth.clientId("resource-owner");
-        OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest("secret", "", "", null);
+        oauth.client("resource-owner", "secret");
+        AccessTokenResponse response = oauth.doPasswordGrantRequest("", "");
 
         assertEquals(401, response.getStatusCode());
 
@@ -198,8 +197,8 @@ public class X509DirectGrantTest extends AbstractX509AuthenticationTest {
             String cfgId = createConfig(directGrantExecution.getId(), cfg);
             Assert.assertNotNull(cfgId);
 
-            oauth.clientId("resource-owner");
-            OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest("secret", "", "", null);
+            oauth.client("resource-owner", "secret");
+            AccessTokenResponse response = oauth.doPasswordGrantRequest("", "");
 
             events.expectLogin()
                     .user(userId)
@@ -237,12 +236,12 @@ public class X509DirectGrantTest extends AbstractX509AuthenticationTest {
         String cfgId = createConfig(directGrantExecution.getId(), cfg);
         Assert.assertNotNull(cfgId);
 
-        oauth.clientId("resource-owner");
-        OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest("secret", "", "", null);
+        oauth.client("resource-owner", "secret");
+        AccessTokenResponse response = oauth.doPasswordGrantRequest("", "");
 
         assertEquals(401, response.getStatusCode());
         assertEquals("invalid_request", response.getError());
-        Assert.assertThat(response.getErrorDescription(), containsString("Certificate has been revoked, certificate's subject:"));
+        assertThat(response.getErrorDescription(), containsString("Certificate has been revoked, certificate's subject:"));
 
     }
 
@@ -258,16 +257,14 @@ public class X509DirectGrantTest extends AbstractX509AuthenticationTest {
         String cfgId = createConfig(directGrantExecution.getId(), cfg);
         Assert.assertNotNull(cfgId);
 
-        oauth.clientId("resource-owner");
-        OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest("secret", "", "", null);
+        oauth.client("resource-owner", "secret");
+        AccessTokenResponse response = oauth.doPasswordGrantRequest("", "");
 
         assertEquals(200, response.getStatusCode());
     }
 
     @Test
     public void loginCertificateExpired() throws Exception {
-        Assume.assumeFalse("Time offset is causing integer overflow. With the old store it works, because root authentication session has also timestamp overflown, this is not true for the new store so the test is failing.", keycloakUsingProviderWithId(AuthenticationSessionProvider.class, "map"));
-
         X509AuthenticatorConfigModel config =
                 new X509AuthenticatorConfigModel()
                     .setCertValidationEnabled(true)
@@ -280,14 +277,14 @@ public class X509DirectGrantTest extends AbstractX509AuthenticationTest {
 
         setTimeOffset(50 * 365 * 24 * 60 * 60);
 
-        oauth.clientId("resource-owner");
-        OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest("secret", "", "", null);
+        oauth.client("resource-owner", "secret");
+        AccessTokenResponse response = oauth.doPasswordGrantRequest("", "");
 
         setTimeOffset(0);
 
         assertEquals(401, response.getStatusCode());
         assertEquals("invalid_request", response.getError());
-        Assert.assertThat(response.getErrorDescription(), containsString("has expired on:"));
+        assertThat(response.getErrorDescription(), containsString("has expired on:"));
     }
 
     private void loginForceTemporaryAccountLock() throws Exception {
@@ -309,10 +306,10 @@ public class X509DirectGrantTest extends AbstractX509AuthenticationTest {
 
         events.clear();
 
-        oauth.clientId("resource-owner");
-        oauth.doGrantAccessTokenRequest("secret", "", "", null);
-        oauth.doGrantAccessTokenRequest("secret", "", "", null);
-        oauth.doGrantAccessTokenRequest("secret", "", "", null);
+        oauth.client("resource-owner", "secret");
+        oauth.doPasswordGrantRequest("", "");
+        oauth.doPasswordGrantRequest("", "");
+        oauth.doPasswordGrantRequest("", "");
 
         events.clear();
     }
@@ -328,8 +325,8 @@ public class X509DirectGrantTest extends AbstractX509AuthenticationTest {
         String cfgId = createConfig(directGrantExecution.getId(), cfg);
         Assert.assertNotNull(cfgId);
 
-        oauth.clientId("resource-owner");
-        OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest("secret", "", "", null);
+        oauth.client("resource-owner", "secret");
+        AccessTokenResponse response = oauth.doPasswordGrantRequest("", "");
 
         events.expectLogin()
                 .user(userId)
@@ -349,8 +346,8 @@ public class X509DirectGrantTest extends AbstractX509AuthenticationTest {
 
     private void doResourceOwnerCredentialsLogin(String clientId, String clientSecret, String login, String password) throws Exception {
 
-        oauth.clientId(clientId);
-        OAuthClient.AccessTokenResponse response = oauth.doGrantAccessTokenRequest(clientSecret, "", "", null);
+        oauth.client(clientId, clientSecret);
+        AccessTokenResponse response = oauth.doPasswordGrantRequest( "", "");
 
         assertEquals(200, response.getStatusCode());
 

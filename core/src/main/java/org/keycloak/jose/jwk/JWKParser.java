@@ -17,12 +17,6 @@
 
 package org.keycloak.jose.jwk;
 
-
-import org.keycloak.common.crypto.CryptoIntegration;
-import org.keycloak.common.util.Base64Url;
-import org.keycloak.crypto.KeyType;
-import org.keycloak.util.JsonSerialization;
-
 import java.math.BigInteger;
 import java.security.KeyFactory;
 import java.security.PublicKey;
@@ -31,22 +25,28 @@ import java.security.spec.ECPoint;
 import java.security.spec.ECPublicKeySpec;
 import java.security.spec.RSAPublicKeySpec;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import org.keycloak.common.crypto.CryptoIntegration;
+import org.keycloak.common.util.Base64Url;
+import org.keycloak.crypto.KeyType;
+import org.keycloak.util.JsonSerialization;
+
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
 public class JWKParser {
 
-    private JWK jwk;
+    protected JWK jwk;
 
     private JWKParser() {
     }
 
-    public JWKParser(JWK jwk) {
-        this.jwk = jwk;
-    }
-
     public static JWKParser create() {
         return new JWKParser();
+    }
+
+    public JWKParser(JWK jwk) {
+        this.jwk = jwk;
     }
 
     public static JWKParser create(JWK jwk) {
@@ -67,21 +67,40 @@ public class JWKParser {
     }
 
     public PublicKey toPublicKey() {
+        if (jwk == null) {
+            throw new IllegalStateException("Not possible to convert to the publicKey. The jwk is not set");
+        }
         String keyType = jwk.getKeyType();
-        if (keyType.equals(KeyType.RSA)) {
-            return createRSAPublicKey();
-        } else if (keyType.equals(KeyType.EC)) {
-            return createECPublicKey();
 
+        // subtypes may store properties differently while representing the same JWK, serializing it to nodes
+        // makes sure there is no difference when creating the keys
+        JsonNode normalizedJwkNode = JsonSerialization.writeValueAsNode(jwk);
+        if (KeyType.RSA.equals(keyType)) {
+            return createRSAPublicKey(normalizedJwkNode);
+        } else if (KeyType.EC.equals(keyType)) {
+            return createECPublicKey(normalizedJwkNode);
+        } else if (KeyType.OKP.equals(keyType)) {
+            return JWKBuilder.EdEC_UTILS.createOKPPublicKey(jwk);
         } else {
             throw new RuntimeException("Unsupported keyType " + keyType);
         }
     }
 
-    private PublicKey createECPublicKey() {
-        String crv = (String) jwk.getOtherClaims().get(ECPublicJWK.CRV);
-        BigInteger x = new BigInteger(1, Base64Url.decode((String) jwk.getOtherClaims().get(ECPublicJWK.X)));
-        BigInteger y = new BigInteger(1, Base64Url.decode((String) jwk.getOtherClaims().get(ECPublicJWK.Y)));
+    private static PublicKey createECPublicKey(JsonNode jwk) {
+
+
+        /* Try retrieving the necessary fields */
+        String crv = jwk.path(ECPublicJWK.CRV).asText(null);
+        String xStr = jwk.get(ECPublicJWK.X).asText(null);
+        String yStr = jwk.get(ECPublicJWK.Y).asText(null);
+
+        /* Check if the retrieving of necessary fields success */
+        if (crv == null || xStr == null || yStr == null) {
+            throw new RuntimeException("Fail to retrieve ECPublicJWK.CRV, ECPublicJWK.X or ECPublicJWK.Y field.");
+        }
+
+        BigInteger x = new BigInteger(1, Base64Url.decode(xStr));
+        BigInteger y = new BigInteger(1, Base64Url.decode(yStr));
 
         String name;
         switch (crv) {
@@ -99,7 +118,7 @@ public class JWKParser {
         }
 
         try {
-            
+
             ECPoint point = new ECPoint(x, y);
             ECParameterSpec params = CryptoIntegration.getProvider().createECParams(name);
             ECPublicKeySpec pubKeySpec = new ECPublicKeySpec(point, params);
@@ -111,9 +130,9 @@ public class JWKParser {
         }
     }
 
-    private PublicKey createRSAPublicKey() {
-        BigInteger modulus = new BigInteger(1, Base64Url.decode(jwk.getOtherClaims().get(RSAPublicJWK.MODULUS).toString()));
-        BigInteger publicExponent = new BigInteger(1, Base64Url.decode(jwk.getOtherClaims().get(RSAPublicJWK.PUBLIC_EXPONENT).toString()));
+    private static PublicKey createRSAPublicKey(JsonNode jwk) {
+        BigInteger modulus = new BigInteger(1, Base64Url.decode(jwk.path(RSAPublicJWK.MODULUS).asText(null)));
+        BigInteger publicExponent = new BigInteger(1, Base64Url.decode(jwk.path(RSAPublicJWK.PUBLIC_EXPONENT).asText(null)));
 
         try {
             KeyFactory kf = KeyFactory.getInstance("RSA");
@@ -124,7 +143,7 @@ public class JWKParser {
     }
 
     public boolean isKeyTypeSupported(String keyType) {
-        return (RSAPublicJWK.RSA.equals(keyType) || ECPublicJWK.EC.equals(keyType));
+        return (RSAPublicJWK.RSA.equals(keyType) || ECPublicJWK.EC.equals(keyType)
+                || (JWKBuilder.EdEC_UTILS.isEdECSupported() && OKPPublicJWK.OKP.equals(keyType)));
     }
-
 }

@@ -16,14 +16,20 @@
  */
 package org.keycloak.testsuite.actions;
 
+import org.hamcrest.MatcherAssert;
+import org.hamcrest.Matchers;
+import org.jboss.arquillian.drone.api.annotation.Drone;
 import org.jboss.arquillian.graphene.page.Page;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.keycloak.admin.client.resource.AuthenticationManagementResource;
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.admin.client.resource.UserResource;
-import org.keycloak.common.Profile;
+import org.keycloak.authentication.authenticators.browser.OTPFormAuthenticatorFactory;
+import org.keycloak.authentication.authenticators.browser.RecoveryAuthnCodesFormAuthenticatorFactory;
+import org.keycloak.authentication.requiredactions.UpdateTotp;
 import org.keycloak.events.Details;
 import org.keycloak.events.EventType;
 import org.keycloak.models.AuthenticationExecutionModel;
@@ -31,15 +37,15 @@ import org.keycloak.models.UserModel;
 import org.keycloak.models.credential.OTPCredentialModel;
 import org.keycloak.models.utils.HmacOTP;
 import org.keycloak.models.utils.TimeBasedOTP;
+import org.keycloak.representations.idm.AuthenticationExecutionInfoRepresentation;
 import org.keycloak.representations.idm.EventRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.RequiredActionProviderRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
-import org.keycloak.testsuite.AssertEvents;
+import org.keycloak.representations.idm.UserSessionRepresentation;
 import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
+import org.keycloak.testsuite.AssertEvents;
 import org.keycloak.testsuite.admin.ApiUtil;
-import org.keycloak.testsuite.arquillian.annotation.DisableFeature;
-import org.keycloak.testsuite.pages.AccountTotpPage;
 import org.keycloak.testsuite.pages.AppPage;
 import org.keycloak.testsuite.pages.AppPage.RequestType;
 import org.keycloak.testsuite.pages.LanguageComboboxAwarePage;
@@ -47,15 +53,24 @@ import org.keycloak.testsuite.pages.LoginConfigTotpPage;
 import org.keycloak.testsuite.pages.LoginPage;
 import org.keycloak.testsuite.pages.LoginTotpPage;
 import org.keycloak.testsuite.pages.RegisterPage;
+import org.keycloak.testsuite.pages.SetupRecoveryAuthnCodesPage;
 import org.keycloak.testsuite.updaters.RealmAttributeUpdater;
-import org.keycloak.testsuite.util.OAuthClient;
+import org.keycloak.testsuite.util.AccountHelper;
 import org.keycloak.testsuite.util.RealmBuilder;
+import org.keycloak.testsuite.util.SecondBrowser;
 import org.keycloak.testsuite.util.UserBuilder;
+import org.keycloak.testsuite.util.oauth.AccessTokenResponse;
+import org.keycloak.testsuite.util.oauth.OAuthClient;
 import org.openqa.selenium.By;
+import org.openqa.selenium.WebDriver;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -64,7 +79,6 @@ import static org.junit.Assert.assertTrue;
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
-@DisableFeature(value = Profile.Feature.ACCOUNT2, skipRestart = true) // TODO remove this (KEYCLOAK-16228)
 public class RequiredActionTotpSetupTest extends AbstractTestRealmKeycloakTest {
 
     @Override
@@ -76,28 +90,51 @@ public class RequiredActionTotpSetupTest extends AbstractTestRealmKeycloakTest {
         requiredAction.setEnabled(true);
         requiredAction.setDefaultAction(true);
 
+        RequiredActionProviderRepresentation recoveryCodesAction = new RequiredActionProviderRepresentation();
+        recoveryCodesAction.setAlias(UserModel.RequiredAction.CONFIGURE_RECOVERY_AUTHN_CODES.name());
+        recoveryCodesAction.setProviderId(UserModel.RequiredAction.CONFIGURE_RECOVERY_AUTHN_CODES.name());
+        recoveryCodesAction.setName("Recovery codes");
+        recoveryCodesAction.setEnabled(true);
+
         List<RequiredActionProviderRepresentation> requiredActions = new LinkedList<>();
         requiredActions.add(requiredAction);
+        requiredActions.add(recoveryCodesAction);
         testRealm.setRequiredActions(requiredActions);
         testRealm.setResetPasswordAllowed(Boolean.TRUE);
     }
 
+    private void setOTPAuthRequirement(AuthenticationExecutionModel.Requirement conditionalReq, AuthenticationExecutionModel.Requirement otpReq) {
+        AuthenticationManagementResource authMgtRes = testRealm().flows();
+        AuthenticationExecutionInfoRepresentation browserConditionalExecution = authMgtRes.getExecutions("browser").stream()
+                .filter(execution -> execution.getDisplayName().equals("Browser - Conditional 2FA"))
+                .findAny()
+                .get();
+        browserConditionalExecution.setRequirement(conditionalReq.name());
+        authMgtRes.updateExecutions("browser", browserConditionalExecution);
+        AuthenticationExecutionInfoRepresentation otpExecution = authMgtRes.getExecutions("Browser - Conditional 2FA").stream()
+                .filter(execution -> OTPFormAuthenticatorFactory.PROVIDER_ID.equals(execution.getProviderId()))
+                .findAny()
+                .get();
+        otpExecution.setRequirement(otpReq.name());
+        authMgtRes.updateExecutions("browser", otpExecution);
+    }
+
+    private void configureRequiredActionsToUser(String username, String... actions) {
+        UserResource userResource = ApiUtil.findUserByUsernameId(testRealm(), username);
+        UserRepresentation userRepresentation = userResource.toRepresentation();
+        userRepresentation.setRequiredActions(Arrays.asList(actions));
+        userResource.update(userRepresentation);
+    }
+
     @Before
     public void setOTPAuthRequired() {
-
-        adminClient.realm("test").flows().getExecutions("browser").
-                stream().filter(execution -> execution.getDisplayName().equals("Browser - Conditional OTP"))
-                .forEach(execution ->
-                {execution.setRequirement(AuthenticationExecutionModel.Requirement.REQUIRED.name());
-                adminClient.realm("test").flows().updateExecutions("browser", execution);});
-
         ApiUtil.removeUserByUsername(testRealm(), "test-user@localhost");
         UserRepresentation user = UserBuilder.create().enabled(true)
                 .username("test-user@localhost")
                 .email("test-user@localhost")
                 .firstName("Tom")
                 .lastName("Brady")
-                .requiredAction(UserModel.RequiredAction.UPDATE_PROFILE.name()).build();
+                .build();
         ApiUtil.createUserAndResetPasswordWithAdminClient(testRealm(), user, "password");
     }
 
@@ -118,10 +155,14 @@ public class RequiredActionTotpSetupTest extends AbstractTestRealmKeycloakTest {
     protected LoginConfigTotpPage totpPage;
 
     @Page
-    protected AccountTotpPage accountTotpPage;
+    protected RegisterPage registerPage;
 
     @Page
-    protected RegisterPage registerPage;
+    protected SetupRecoveryAuthnCodesPage setupRecoveryAuthnCodesPage;
+
+    @Drone
+    @SecondBrowser
+    private WebDriver driver2;
 
     protected TimeBasedOTP totp = new TimeBasedOTP();
 
@@ -133,7 +174,7 @@ public class RequiredActionTotpSetupTest extends AbstractTestRealmKeycloakTest {
 
         String userId = events.expectRegister("setupTotp", "email@mail.com").assertEvent().getUserId();
 
-        assertTrue(totpPage.isCurrent());
+        totpPage.assertCurrent();
         assertFalse(totpPage.isCancelDisplayed());
 
         // assert attempted-username not shown when setup TOTP
@@ -142,14 +183,34 @@ public class RequiredActionTotpSetupTest extends AbstractTestRealmKeycloakTest {
         // KEYCLOAK-11753 - Verify OTP label element present on "Configure OTP" required action form
         driver.findElement(By.id("userLabel"));
 
+        String totpSecret = totpPage.getTotpSecret();
+
+        //submit with wrong otp
+        totpPage.configure("wrongOtp");
+        totpPage.assertCurrent();
+
+        //assert totpSecret doesn't change after a wrong submit
+        assertEquals(totpSecret, totpPage.getTotpSecret());
+
         totpPage.configure(totp.generateTOTP(totpPage.getTotpSecret()));
 
-        String authSessionId = events.expectRequiredAction(EventType.UPDATE_TOTP).user(userId).detail(Details.USERNAME, "setuptotp").assertEvent()
+        String authSessionId1 = events.expectRequiredAction(EventType.UPDATE_TOTP)
+                .user(userId)
+                .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE)
+                .detail(Details.USERNAME, "setuptotp").assertEvent()
                 .getDetails().get(Details.CODE_ID);
 
         assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
 
-        events.expectLogin().user(userId).session(authSessionId).detail(Details.USERNAME, "setuptotp").assertEvent();
+        events.expectRequiredAction(EventType.UPDATE_CREDENTIAL)
+                .user(userId)
+                .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE)
+                .detail(Details.USERNAME, "setuptotp").assertEvent()
+                .getDetails().get(Details.CODE_ID);
+
+        assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+
+        events.expectLogin().user(userId).session(authSessionId1).detail(Details.USERNAME, "setuptotp").assertEvent();
     }
 
     @Test
@@ -278,7 +339,7 @@ public class RequiredActionTotpSetupTest extends AbstractTestRealmKeycloakTest {
 
         String userId = events.expectRegister("setupTotpRegister", "setupTotpRegister@mail.com").assertEvent().getUserId();
 
-        assertTrue(totpPage.isCurrent());
+        totpPage.assertCurrent();
 
         // KEYCLOAK-11753 - Verify OTP label element present on "Configure OTP" required action form
         driver.findElement(By.id("userLabel"));
@@ -290,12 +351,9 @@ public class RequiredActionTotpSetupTest extends AbstractTestRealmKeycloakTest {
         // Set OTP label to a custom value
         totpPage.configure(totp.generateTOTP(totpPage.getTotpSecret()), customOtpLabel);
 
-        // Open account page & verify OTP authenticator with requested label was created
-        accountTotpPage.open();
-        accountTotpPage.assertCurrent();
-
-        String pageSource = driver.getPageSource();
-        assertTrue(pageSource.contains(customOtpLabel));
+        // Check if OTP credential is present
+        Assert.assertTrue(AccountHelper.isTotpPresent(testRealm(), "setupTotpRegister"));
+        Assert.assertTrue(AccountHelper.totpUserLabelComparator(testRealm(), "setupTotpRegister", customOtpLabel));
     }
 
     @Test
@@ -314,7 +372,7 @@ public class RequiredActionTotpSetupTest extends AbstractTestRealmKeycloakTest {
             String pageSource = driver.getPageSource();
 
             assertTrue(pageSource.contains("FreeOTP"));
-            assertFalse(pageSource.contains("Google Authenticator"));
+            assertTrue(pageSource.contains("Google Authenticator"));
             assertFalse(pageSource.contains("Microsoft Authenticator"));
 
             totpPage.clickManual();
@@ -352,31 +410,35 @@ public class RequiredActionTotpSetupTest extends AbstractTestRealmKeycloakTest {
 
         String totpSecret = totpPage.getTotpSecret();
 
-        totpPage.configure(totp.generateTOTP(totpSecret));
+        String firstCode = totp.generateTOTP(totpSecret);
 
-        String authSessionId = events.expectRequiredAction(EventType.UPDATE_TOTP).assertEvent()
+        totpPage.configure(firstCode);
+
+        String authSessionId1 = events.expectRequiredAction(EventType.UPDATE_TOTP)
+                .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE).assertEvent()
+                .getDetails().get(Details.CODE_ID);
+        String authSessionId2 = events.expectRequiredAction(EventType.UPDATE_CREDENTIAL)
+                .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE).assertEvent()
                 .getDetails().get(Details.CODE_ID);
 
+        assertEquals(authSessionId1, authSessionId2);
         assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
 
-        EventRepresentation loginEvent = events.expectLogin().session(authSessionId).assertEvent();
+        EventRepresentation loginEvent = events.expectLogin().session(authSessionId1).assertEvent();
 
-        OAuthClient.AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
-        oauth.idTokenHint(tokenResponse.getIdToken()).openLogout();
+        AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
+        oauth.logoutForm().idTokenHint(tokenResponse.getIdToken()).withRedirect().open();
 
-        events.expectLogout(authSessionId).assertEvent();
-
-        if (!reusableCodesEnabled) {
-            setTimeOffset(TimeBasedOTP.DEFAULT_INTERVAL_SECONDS);
-        }
+        events.expectLogout(authSessionId1).assertEvent();
 
         loginPage.open();
         loginPage.login("test-user@localhost", "password");
-        String src = driver.getPageSource();
-        loginTotpPage.login(totp.generateTOTP(totpSecret));
+
+        loginTotpPage.login(firstCode);
 
         if (!reusableCodesEnabled) {
             loginTotpPage.assertCurrent();
+            assertEquals("Invalid authenticator code.", loginTotpPage.getInputError());
         } else {
             assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
             events.expectLogin().assertEvent();
@@ -386,100 +448,117 @@ public class RequiredActionTotpSetupTest extends AbstractTestRealmKeycloakTest {
     //KEYCLOAK-15511
     @Test
     public void setupTotpEnforcedBySessionNotForUserInGeneral() {
-        String username = "test-user@localhost";
-        String configureTotp = UserModel.RequiredAction.CONFIGURE_TOTP.name();
+        setOTPAuthRequirement(AuthenticationExecutionModel.Requirement.REQUIRED, AuthenticationExecutionModel.Requirement.REQUIRED);
+        try {
+            String username = "test-user@localhost";
+            String configureTotp = UserModel.RequiredAction.CONFIGURE_TOTP.name();
 
-        // Remove required action from the user
-        UserResource user = ApiUtil.findUserByUsernameId(testRealm(), username);
-        UserRepresentation userRepresentation = user.toRepresentation();
-        userRepresentation.getRequiredActions().remove(configureTotp);
-        user.update(userRepresentation);
+            // Remove required action from the user
+            UserResource user = ApiUtil.findUserByUsernameId(testRealm(), username);
+            UserRepresentation userRepresentation = user.toRepresentation();
+            userRepresentation.getRequiredActions().remove(configureTotp);
+            user.update(userRepresentation);
 
-        // login
-        loginPage.open();
-        loginPage.login(username, "password");
+            // login
+            loginPage.open();
+            loginPage.login(username, "password");
 
-        // ensure TOTP configuration is enforced for current authentication session
-        totpPage.assertCurrent();
+            // ensure TOTP configuration is enforced for current authentication session
+            totpPage.assertCurrent();
 
-        // ensure TOTP configuration it is not enforced for the user in general
-        userRepresentation = user.toRepresentation();
-        assertFalse(userRepresentation.getRequiredActions().contains(configureTotp));
+            // ensure TOTP configuration it is not enforced for the user in general
+            userRepresentation = user.toRepresentation();
+            assertFalse(userRepresentation.getRequiredActions().contains(configureTotp));
+        } finally {
+            setOTPAuthRequirement(AuthenticationExecutionModel.Requirement.CONDITIONAL, AuthenticationExecutionModel.Requirement.ALTERNATIVE);
+        }
     }
 
     @Test
     public void setupTotpRegisteredAfterTotpRemoval() {
-        // Register new user
-        loginPage.open();
-        loginPage.clickRegister();
-        registerPage.register("firstName2", "lastName2", "email2@mail.com", "setupTotp2", "password2", "password2");
+        setOTPAuthRequirement(AuthenticationExecutionModel.Requirement.REQUIRED, AuthenticationExecutionModel.Requirement.REQUIRED);
+        try {
+            // Register new user
+            loginPage.open();
+            loginPage.clickRegister();
+            registerPage.register("firstName2", "lastName2", "email2@mail.com", "setupTotp2", "password2", "password2");
 
-        String userId = events.expectRegister("setupTotp2", "email2@mail.com").assertEvent().getUserId();
+            String userId = events.expectRegister("setupTotp2", "email2@mail.com").assertEvent().getUserId();
 
-        // Configure totp
-        totpPage.assertCurrent();
+            // Configure totp
+            totpPage.assertCurrent();
 
-        String totpCode = totpPage.getTotpSecret();
-        totpPage.configure(totp.generateTOTP(totpCode));
+            String totpCode = totpPage.getTotpSecret();
+            totpPage.configure(totp.generateTOTP(totpCode));
 
-        // After totp config, user should be on the app page
-        assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+            // After totp config, user should be on the app page
+            assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
 
-        events.expectRequiredAction(EventType.UPDATE_TOTP).user(userId).detail(Details.USERNAME, "setuptotp2").assertEvent();
+            events.expectRequiredAction(EventType.UPDATE_TOTP)
+                    .user(userId)
+                    .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE)
+                    .detail(Details.USERNAME, "setuptotp2").assertEvent();
+            events.expectRequiredAction(EventType.UPDATE_CREDENTIAL)
+                    .user(userId)
+                    .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE)
+                    .detail(Details.USERNAME, "setuptotp2").assertEvent();
 
-        EventRepresentation loginEvent = events.expectLogin().user(userId).detail(Details.USERNAME, "setuptotp2").assertEvent();
+            EventRepresentation loginEvent = events.expectLogin().user(userId).detail(Details.USERNAME, "setuptotp2").assertEvent();
 
-        // Logout
-        OAuthClient.AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
-        oauth.idTokenHint(tokenResponse.getIdToken()).openLogout();
-        events.expectLogout(loginEvent.getSessionId()).user(userId).assertEvent();
+            // Logout
+            AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
+            oauth.logoutForm().idTokenHint(tokenResponse.getIdToken()).withRedirect().open();
+            events.expectLogout(loginEvent.getSessionId()).user(userId).assertEvent();
 
-        setOtpTimeOffset(TimeBasedOTP.DEFAULT_INTERVAL_SECONDS, totp);
+            setOtpTimeOffset(TimeBasedOTP.DEFAULT_INTERVAL_SECONDS, totp);
 
-        // Try to login after logout
-        loginPage.open();
-        loginPage.login("setupTotp2", "password2");
+            // Try to login after logout
+            loginPage.open();
+            loginPage.login("setupTotp2", "password2");
 
-        // Totp is already configured, thus one-time password is needed, login page should be loaded
-        String uri = driver.getCurrentUrl();
-        String src = driver.getPageSource();
-        assertTrue(loginPage.isCurrent());
-        Assert.assertFalse(totpPage.isCurrent());
+            // Totp is already configured, thus one-time password is needed, login page should be loaded
+            String uri = driver.getCurrentUrl();
+            String src = driver.getPageSource();
+            assertTrue(loginPage.isCurrent());
+            Assert.assertFalse(totpPage.isCurrent());
 
-        // Login with one-time password
-        loginTotpPage.login(totp.generateTOTP(totpCode));
+            // Login with one-time password
+            loginTotpPage.login(totp.generateTOTP(totpCode));
 
-        loginEvent = events.expectLogin().user(userId).detail(Details.USERNAME, "setupTotp2").assertEvent();
+            loginEvent = events.expectLogin().user(userId).detail(Details.USERNAME, "setupTotp2").assertEvent();
 
-        // Open account page
-        accountTotpPage.open();
-        accountTotpPage.assertCurrent();
+            // Remove google authenticator
+            Assert.assertTrue(AccountHelper.deleteTotpAuthentication(testRealm(), "setupTotp2"));
+            AccountHelper.logout(testRealm(), "setupTotp2");
 
-        // Remove google authentificator
-        accountTotpPage.removeTotp();
+            setOtpTimeOffset(TimeBasedOTP.DEFAULT_INTERVAL_SECONDS, totp);
 
-        events.expectAccount(EventType.REMOVE_TOTP).user(userId).assertEvent();
+            // Try to login
+            loginPage.open();
+            loginPage.login("setupTotp2", "password2");
 
-        // Logout
-        accountTotpPage.logout();
-        events.expectLogout(loginEvent.getSessionId()).user(userId).detail(Details.REDIRECT_URI, oauth.AUTH_SERVER_ROOT + "/realms/test/account/totp").assertEvent();
+            // Since the authentificator was removed, it has to be set up again
+            totpPage.assertCurrent();
+            totpPage.configure(totp.generateTOTP(totpPage.getTotpSecret()));
 
-        setOtpTimeOffset(TimeBasedOTP.DEFAULT_INTERVAL_SECONDS, totp);
+            String sessionId1 = events.expectRequiredAction(EventType.UPDATE_TOTP)
+                    .user(userId)
+                    .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE)
+                    .detail(Details.USERNAME, "setupTotp2").assertEvent()
+                    .getDetails().get(Details.CODE_ID);
+            String sessionId2 = events.expectRequiredAction(EventType.UPDATE_CREDENTIAL)
+                    .user(userId)
+                    .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE)
+                    .detail(Details.USERNAME, "setupTotp2").assertEvent()
+                    .getDetails().get(Details.CODE_ID);
 
-        // Try to login
-        loginPage.open();
-        loginPage.login("setupTotp2", "password2");
+            assertEquals(sessionId1, sessionId2);
+            assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
 
-        // Since the authentificator was removed, it has to be set up again
-        totpPage.assertCurrent();
-        totpPage.configure(totp.generateTOTP(totpPage.getTotpSecret()));
-
-        String sessionId = events.expectRequiredAction(EventType.UPDATE_TOTP).user(userId).detail(Details.USERNAME, "setupTotp2").assertEvent()
-                .getDetails().get(Details.CODE_ID);
-
-        assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
-
-        events.expectLogin().user(userId).session(sessionId).detail(Details.USERNAME, "setupTotp2").assertEvent();
+            events.expectLogin().user(userId).session(sessionId1).detail(Details.USERNAME, "setupTotp2").assertEvent();
+        } finally {
+            setOTPAuthRequirement(AuthenticationExecutionModel.Requirement.CONDITIONAL, AuthenticationExecutionModel.Requirement.ALTERNATIVE);
+        }
     }
 
     @Test
@@ -506,15 +585,20 @@ public class RequiredActionTotpSetupTest extends AbstractTestRealmKeycloakTest {
         TimeBasedOTP timeBased = new TimeBasedOTP(HmacOTP.HMAC_SHA1, 8, 30, 1);
         totpPage.configure(timeBased.generateTOTP(totpSecret));
 
-        String sessionId = events.expectRequiredAction(EventType.UPDATE_TOTP).assertEvent()
+        String sessionId1 = events.expectRequiredAction(EventType.UPDATE_TOTP)
+                .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE).assertEvent()
+                .getDetails().get(Details.CODE_ID);
+        String sessionId2 = events.expectRequiredAction(EventType.UPDATE_CREDENTIAL)
+                .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE).assertEvent()
                 .getDetails().get(Details.CODE_ID);
 
+        assertEquals(sessionId1, sessionId2);
         assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
 
-        EventRepresentation loginEvent = events.expectLogin().session(sessionId).assertEvent();
+        EventRepresentation loginEvent = events.expectLogin().session(sessionId1).assertEvent();
 
-        OAuthClient.AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
-        oauth.idTokenHint(tokenResponse.getIdToken()).openLogout();
+        AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
+        oauth.logoutForm().idTokenHint(tokenResponse.getIdToken()).withRedirect().open();
 
         events.expectLogout(loginEvent.getSessionId()).assertEvent();
 
@@ -561,15 +645,20 @@ public class RequiredActionTotpSetupTest extends AbstractTestRealmKeycloakTest {
         HmacOTP otpgen = new HmacOTP(6, HmacOTP.HMAC_SHA1, 1);
         totpPage.configure(otpgen.generateHOTP(totpSecret, 0));
         String uri = driver.getCurrentUrl();
-        String sessionId = events.expectRequiredAction(EventType.UPDATE_TOTP).assertEvent()
-            .getDetails().get(Details.CODE_ID);
+        String sessionId1 = events.expectRequiredAction(EventType.UPDATE_TOTP)
+                .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE).assertEvent()
+                .getDetails().get(Details.CODE_ID);
+        String sessionId2 = events.expectRequiredAction(EventType.UPDATE_CREDENTIAL)
+                .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE).assertEvent()
+                .getDetails().get(Details.CODE_ID);
 
+        assertEquals(sessionId1, sessionId2);
         assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
 
-        EventRepresentation loginEvent = events.expectLogin().session(sessionId).assertEvent();
+        EventRepresentation loginEvent = events.expectLogin().session(sessionId1).assertEvent();
 
-        OAuthClient.AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
-        oauth.idTokenHint(tokenResponse.getIdToken()).openLogout();
+        AccessTokenResponse tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
+        oauth.logoutForm().idTokenHint(tokenResponse.getIdToken()).withRedirect().open();
 
         events.expectLogout(loginEvent.getSessionId()).assertEvent();
 
@@ -584,8 +673,8 @@ public class RequiredActionTotpSetupTest extends AbstractTestRealmKeycloakTest {
         loginEvent = events.expectLogin().assertEvent();
 
         tokenResponse = sendTokenRequestAndGetResponse(loginEvent);
-        oauth.idTokenHint(tokenResponse.getIdToken()).openLogout();
-        events.expectLogout(null).session(AssertEvents.isUUID()).assertEvent();
+        oauth.logoutForm().idTokenHint(tokenResponse.getIdToken()).withRedirect().open();
+        events.expectLogout(null).session(AssertEvents.isSessionId()).assertEvent();
 
         // test lookAheadWindow
         realmRep = adminClient.realm("test").toRepresentation();
@@ -621,4 +710,108 @@ public class RequiredActionTotpSetupTest extends AbstractTestRealmKeycloakTest {
 
     }
 
+    @Test
+    public void testTotpLogoutOtherSessionsChecked() {
+        testTotpLogoutOtherSessions(true);
+    }
+
+    @Test
+    public void testTotpLogoutOtherSessionsNotChecked() {
+        testTotpLogoutOtherSessions(false);
+    }
+
+    private void testTotpLogoutOtherSessions(boolean logoutOtherSessions) {
+        configureRequiredActionsToUser("test-user@localhost");
+
+        // login with the user using the second driver
+        UserResource testUser = testRealm().users().get(findUser("test-user@localhost").getId());
+        OAuthClient oauth2 = oauth.newConfig().driver(driver2);
+        oauth2.doLogin("test-user@localhost", "password");
+        EventRepresentation event1 = events.expectLogin().assertEvent();
+        assertEquals(1, testUser.getUserSessions().size());
+
+        // add action to configure totp
+        configureRequiredActionsToUser("test-user@localhost", UserModel.RequiredAction.CONFIGURE_TOTP.name());
+
+        // login and configure totp checking/unchecking the logout checkbox
+        loginPage.open();
+        loginPage.login("test-user@localhost", "password");
+        totpPage.assertCurrent();
+        if (logoutOtherSessions) {
+            totpPage.checkLogoutSessions();
+        }
+        Assert.assertEquals(logoutOtherSessions, totpPage.isLogoutSessionsChecked());
+        totpPage.configure(totp.generateTOTP(totpPage.getTotpSecret()));
+        assertEquals(RequestType.AUTH_RESPONSE, appPage.getRequestType());
+
+        if (logoutOtherSessions) {
+            events.expectLogout(event1.getSessionId())
+                    .detail(Details.LOGOUT_TRIGGERED_BY_REQUIRED_ACTION, UserModel.RequiredAction.CONFIGURE_TOTP.name())
+                    .assertEvent();
+        }
+
+        events.expectRequiredAction(EventType.UPDATE_TOTP)
+                .user(event1.getUserId())
+                .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE)
+                .detail(Details.USERNAME, "test-user@localhost").assertEvent();
+        EventRepresentation event2 = events.expectRequiredAction(EventType.UPDATE_CREDENTIAL)
+                .user(event1.getUserId())
+                .detail(Details.CREDENTIAL_TYPE, OTPCredentialModel.TYPE)
+                .detail(Details.USERNAME, "test-user@localhost").assertEvent();
+        event2 = events.expectLogin().user(event2.getUserId()).session(event2.getDetails().get(Details.CODE_ID)).detail(Details.USERNAME, "test-user@localhost").assertEvent();
+
+        // assert old session is gone or is maintained
+        List<UserSessionRepresentation> sessions = testUser.getUserSessions();
+        if (logoutOtherSessions) {
+            assertEquals(1, sessions.size());
+            assertEquals(event2.getSessionId(), sessions.iterator().next().getId());
+        } else {
+            assertEquals(2, sessions.size());
+            MatcherAssert.assertThat(sessions.stream().map(UserSessionRepresentation::getId).collect(Collectors.toList()),
+                    Matchers.containsInAnyOrder(event1.getSessionId(), event2.getSessionId()));
+        }
+    }
+
+    @Test(expected = AssertionError.class)
+    public void setupTotpRegisterVerifyRecoveryCodesSetupDisabled() {
+        setupTotpRegisterVerifyRecoveryCodesSetup(false);
+    }
+
+    @Test
+    public void setupTotpRegisterVerifyRecoveryCodesSetupEnabled() {
+        setupTotpRegisterVerifyRecoveryCodesSetup(true);
+    }
+
+    private void setupTotpRegisterVerifyRecoveryCodesSetup(boolean enforceRecoveryCodesSetup) {
+        configureTotpActionToEnforceRecoveryCodes(enforceRecoveryCodesSetup);
+
+        try {
+            // Login
+            loginPage.open();
+            loginPage.login("test-user@localhost", "password");
+
+            // Configure OTP
+            totpPage.assertCurrent();
+            totpPage.configure(this.totp.generateTOTP(totpPage.getTotpSecret()));
+
+            // The next page should be the setup page for recovery codes
+            setupRecoveryAuthnCodesPage.assertCurrent();
+        } finally {
+            // finally, reset totp action config
+            configureTotpActionToEnforceRecoveryCodes(false);
+        }
+    }
+
+    private void configureTotpActionToEnforceRecoveryCodes(boolean enforceRecoveryCodes) {
+        List<RequiredActionProviderRepresentation> requiredActions = testRealm().flows().getRequiredActions();
+        RequiredActionProviderRepresentation totpAction = requiredActions.stream().filter(ra -> ra.getProviderId().equals(UserModel.RequiredAction.CONFIGURE_TOTP.name())).findFirst().orElseThrow();
+        totpAction.setConfig(Map.of(UpdateTotp.ADD_RECOVERY_CODES, Boolean.toString(enforceRecoveryCodes)));
+        testRealm().flows().updateRequiredAction(UserModel.RequiredAction.CONFIGURE_TOTP.name(), totpAction);
+        testRealm().flows().getExecutions("browser").forEach(exe -> {
+            if (Objects.equals(exe.getProviderId(), RecoveryAuthnCodesFormAuthenticatorFactory.PROVIDER_ID)) {
+              exe.setRequirement(enforceRecoveryCodes ? "ALTERNATIVE" : "DISABLED");
+              testRealm().flows().updateExecutions("browser", exe);
+            }
+        });
+    }
 }

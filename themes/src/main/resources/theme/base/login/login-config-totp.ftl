@@ -1,4 +1,5 @@
 <#import "template.ftl" as layout>
+<#import "password-commons.ftl" as passwordCommons>
 <@layout.registrationLayout displayRequiredFields=false displayMessage=!messagesPerField.existsError('totp','userLabel'); section>
 
     <#if section = "header">
@@ -55,8 +56,10 @@
                     <label for="totp" class="control-label">${msg("authenticatorCode")}</label> <span class="required">*</span>
                 </div>
                 <div class="${properties.kcInputWrapperClass!}">
-                    <input type="text" id="totp" name="totp" autocomplete="off" class="${properties.kcInputClass!}"
+                    <input type="text" id="totp" name="totp" autocomplete="one-time-code" class="${properties.kcInputClass!}"
                            aria-invalid="<#if messagesPerField.existsError('totp')>true</#if>"
+                           inputmode="numeric"
+                           dir="ltr"
                     />
 
                     <#if messagesPerField.existsError('totp')>
@@ -77,7 +80,7 @@
 
                 <div class="${properties.kcInputWrapperClass!}">
                     <input type="text" class="${properties.kcInputClass!}" id="userLabel" name="userLabel" autocomplete="off"
-                           aria-invalid="<#if messagesPerField.existsError('userLabel')>true</#if>"
+                           aria-invalid="<#if messagesPerField.existsError('userLabel')>true</#if>" dir="ltr"
                     />
 
                     <#if messagesPerField.existsError('userLabel')>
@@ -86,6 +89,10 @@
                         </span>
                     </#if>
                 </div>
+            </div>
+
+            <div class="${properties.kcFormGroupClass!}">
+                <@passwordCommons.logoutOtherSessions/>
             </div>
 
             <#if isAppInitiatedAction??>

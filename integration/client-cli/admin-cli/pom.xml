@@ -21,26 +21,22 @@
     <parent>
         <artifactId>keycloak-client-cli-parent</artifactId>
         <groupId>org.keycloak</groupId>
-        <version>999-SNAPSHOT</version>
+        <version>999.0.0-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>keycloak-admin-cli</artifactId>
     <name>Keycloak Admin CLI</name>
-    <description/>
+    <description>Keycloak Admin CLI</description>
 
     <dependencies>
         <dependency>
-            <groupId>org.jboss.aesh</groupId>
-            <artifactId>aesh</artifactId>
+            <groupId>info.picocli</groupId>
+            <artifactId>picocli</artifactId>
         </dependency>
         <dependency>
             <groupId>org.keycloak</groupId>
             <artifactId>keycloak-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.keycloak</groupId>
-            <artifactId>${keycloak.crypto.artifactId}</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.httpcomponents</groupId>
@@ -50,7 +46,11 @@
             <groupId>org.jboss.logging</groupId>
             <artifactId>jboss-logging</artifactId>
         </dependency>
-
+        <dependency>
+            <groupId>org.jboss.logging</groupId>
+            <artifactId>commons-logging-jboss-logging</artifactId>
+            <scope>runtime</scope>
+        </dependency>
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
@@ -62,7 +62,6 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-                <!--version>2.4.3</version-->
                 <executions>
                     <execution>
                         <phase>package</phase>
@@ -94,13 +93,20 @@
                                         <include>org/keycloak/representations/idm/IdentityProviderRepresentation.class</include>
                                         <include>org/keycloak/representations/idm/authorization/**</include>
                                         -->
+                                        <include>org/keycloak/representations/oidc/OIDCClientRepresentation.class</include>
                                         <include>org/keycloak/representations/idm/**</include>
                                         <include>org/keycloak/representations/JsonWebToken.class</include>
                                         <include>org/keycloak/Token.class</include>
                                         <include>org/keycloak/TokenCategory.class</include>
                                     </includes>
                                 </filter>
-                                
+                                <filter>
+                                    <artifact>org.keycloak:keycloak-common</artifact>
+                                    <includes>
+                                        <include>org/keycloak/common/util/**</include>
+                                        <include>org/keycloak/common/crypto/**</include>
+                                    </includes>
+                                </filter>
                                 <filter>
                                     <artifact>com.fasterxml.jackson.core:jackson-core</artifact>
                                     <includes>
@@ -120,25 +126,7 @@
                                     </includes>
                                 </filter>
                                 <filter>
-                                    <artifact>org.jboss.resteasy:resteasy-client</artifact>
-                                    <includes>
-                                        <include>**/**</include>
-                                    </includes>
-                                </filter>
-                                <filter>
-                                    <artifact>org.jboss.resteasy:resteasy-core</artifact>
-                                    <includes>
-                                        <include>**/**</include>
-                                    </includes>
-                                </filter>
-                                <filter>
-                                    <artifact>org.jboss.resteasy:resteasy-jackson2-provider</artifact>
-                                    <includes>
-                                        <include>**/**</include>
-                                    </includes>
-                                </filter>
-                                <filter>
-                                    <artifact>org.jboss.spec.javax.ws.rs:jboss-jaxrs-api_2.1_spec</artifact>
+                                    <artifact>jakarta.ws.rs:jakarta.ws.rs-api</artifact>
                                     <includes>
                                         <include>**/**</include>
                                     </includes>

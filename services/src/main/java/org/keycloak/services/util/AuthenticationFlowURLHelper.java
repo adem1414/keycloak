@@ -19,9 +19,9 @@ package org.keycloak.services.util;
 
 import java.net.URI;
 
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriBuilder;
-import javax.ws.rs.core.UriInfo;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.core.UriInfo;
 
 import org.jboss.logging.Logger;
 import org.keycloak.authentication.AuthenticationProcessor;
@@ -56,6 +56,7 @@ public class AuthenticationFlowURLHelper {
 
         logger.debugf("Redirecting to 'page expired' now. Will use last step URL: %s", lastStepUrl);
 
+        LocaleUtil.processLocaleParam(session, realm, authSession);
         return session.getProvider(LoginFormsProvider.class).setAuthenticationSession(authSession)
                 .setActionUri(lastStepUrl)
                 .setExecution(getExecutionId(authSession))
@@ -63,7 +64,7 @@ public class AuthenticationFlowURLHelper {
     }
 
 
-    public URI getLastExecutionUrl(String flowPath, String executionId, String clientId, String tabId) {
+    public URI getLastExecutionUrl(String flowPath, String executionId, String clientId, String tabId, String clientData) {
         UriBuilder uriBuilder = LoginActionsService.loginActionsBaseUrl(uriInfo)
                 .path(flowPath);
 
@@ -72,6 +73,7 @@ public class AuthenticationFlowURLHelper {
         }
         uriBuilder.queryParam(Constants.CLIENT_ID, clientId);
         uriBuilder.queryParam(Constants.TAB_ID, tabId);
+        uriBuilder.queryParam(Constants.CLIENT_DATA, clientData);
 
         return uriBuilder.build(realm.getName());
     }
@@ -89,7 +91,8 @@ public class AuthenticationFlowURLHelper {
             latestFlowPath = LoginActionsService.AUTHENTICATE_PATH;
         }
 
-        return getLastExecutionUrl(latestFlowPath, executionId, authSession.getClient().getClientId(), authSession.getTabId());
+        String clientData = AuthenticationProcessor.getClientData(session, authSession);
+        return getLastExecutionUrl(latestFlowPath, executionId, authSession.getClient().getClientId(), authSession.getTabId(), clientData);
     }
 
     private String getExecutionId(AuthenticationSessionModel authSession) {

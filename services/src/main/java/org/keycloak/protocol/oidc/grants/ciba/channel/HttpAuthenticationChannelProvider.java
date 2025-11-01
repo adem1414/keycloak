@@ -19,17 +19,18 @@ package org.keycloak.protocol.oidc.grants.ciba.channel;
 import java.io.IOException;
 import java.util.Map;
 
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response.Status;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response.Status;
 
-import org.keycloak.broker.provider.util.SimpleHttp;
+import org.keycloak.http.simple.SimpleHttp;
+import org.keycloak.http.simple.SimpleHttpRequest;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.representations.AccessToken;
-import org.keycloak.services.resources.Cors;
+import org.keycloak.services.cors.Cors;
 import org.keycloak.util.TokenUtil;
 
 /**
@@ -78,7 +79,7 @@ public class HttpAuthenticationChannelProvider implements AuthenticationChannelP
             channelRequest.setAcrValues(request.getAcrValues());
             channelRequest.setAdditionalParameters(request.getOtherClaims());
 
-            SimpleHttp simpleHttp = SimpleHttp.doPost(httpAuthenticationChannelUri, session)
+            SimpleHttpRequest simpleHttp = SimpleHttp.create(session).doPost(httpAuthenticationChannelUri)
                     .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON)
                     .json(channelRequest)
                     .auth(createBearerToken(request, client));
@@ -103,6 +104,7 @@ public class HttpAuthenticationChannelProvider implements AuthenticationChannelP
         bearerToken.id(request.getAuthResultId());
         bearerToken.issuedFor(client.getClientId());
         bearerToken.audience(request.getIssuer());
+        bearerToken.iat(request.getIat());
         bearerToken.exp(request.getExp());
         bearerToken.subject(request.getSubject());
 
@@ -121,7 +123,7 @@ public class HttpAuthenticationChannelProvider implements AuthenticationChannelP
     /**
      * Extension point to allow subclass to override this method in order to add data to post to decoupled server.
      */
-    protected SimpleHttp completeDecoupledAuthnRequest(SimpleHttp simpleHttp, AuthenticationChannelRequest channelRequest) {
+    protected SimpleHttpRequest completeDecoupledAuthnRequest(SimpleHttpRequest simpleHttp, AuthenticationChannelRequest channelRequest) {
         return simpleHttp;
     }
 

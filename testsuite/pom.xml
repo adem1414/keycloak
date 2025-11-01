@@ -21,7 +21,7 @@
     <parent>
         <artifactId>keycloak-parent</artifactId>
         <groupId>org.keycloak</groupId>
-        <version>999-SNAPSHOT</version>
+        <version>999.0.0-SNAPSHOT</version>
         <relativePath>../pom.xml</relativePath>
     </parent>
     <modelVersion>4.0.0</modelVersion>
@@ -29,13 +29,7 @@
     <artifactId>keycloak-testsuite-pom</artifactId>
     <packaging>pom</packaging>
     <name>Keycloak TestSuite</name>
-    <description />
-
-    <properties>
-        <keycloak.map.storage.connectionsJpa.url>jdbc:postgresql://localhost:5432/keycloak</keycloak.map.storage.connectionsJpa.url>
-        <keycloak.map.storage.connectionsJpa.user>keycloak</keycloak.map.storage.connectionsJpa.user>
-        <keycloak.map.storage.connectionsJpa.password>pass</keycloak.map.storage.connectionsJpa.password>
-    </properties>
+    <description>Keycloak TestSuite</description>
 
     <build>
         <plugins>
@@ -56,7 +50,6 @@
         </plugins>
     </build>
     <modules>
-        <module>db-allocator-plugin</module>
         <module>integration-arquillian</module>
         <module>model</module>
         <module>utils</module>
@@ -64,11 +57,24 @@
 
     <profiles>
         <profile>
-            <id>performance</id>
-            <modules>
-                <module>performance</module>
-            </modules>
+            <id>deploy-testsuite</id>
+            <activation>
+                <property>
+                    <name>deployTestsuite</name>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-deploy-plugin</artifactId>
+                        <configuration>
+                            <skip>false</skip>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
     </profiles>
-        
+
 </project>

@@ -21,7 +21,6 @@ import static org.keycloak.constants.ServiceUrlConstants.AUTHZ_DISCOVERY_URL;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.Objects;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,9 +29,9 @@ import org.keycloak.authorization.client.resource.AuthorizationResource;
 import org.keycloak.authorization.client.resource.ProtectionResource;
 import org.keycloak.authorization.client.util.Http;
 import org.keycloak.authorization.client.util.TokenCallable;
+import org.keycloak.common.crypto.CryptoIntegration;
 import org.keycloak.common.util.KeycloakUriBuilder;
 import org.keycloak.representations.AccessTokenResponse;
-import org.keycloak.util.SystemPropertiesJsonParserFactory;
 
 /**
  * <p>This is class serves as an entry point for clients looking for access to Keycloak Authorization Services.
@@ -91,18 +90,8 @@ public class AuthzClient {
      * @return a new instance
      */
     public static AuthzClient create(Configuration configuration) {
-        return new AuthzClient(configuration, configuration.getClientAuthenticator());
-    }
-
-    /**
-     * <p>Creates a new instance.
-     *
-     * @param configuration the client configuration
-     * @param authenticator the client authenticator
-     * @return a new instance
-     */
-    public static AuthzClient create(Configuration configuration, ClientAuthenticator authenticator) {
-        return new AuthzClient(configuration, authenticator);
+        CryptoIntegration.init(AuthzClient.class.getClassLoader());
+        return new AuthzClient(configuration);
     }
 
     private final ServerConfiguration serverConfiguration;
@@ -242,7 +231,7 @@ public class AuthzClient {
         return this.configuration;
     }
 
-    private AuthzClient(Configuration configuration, ClientAuthenticator authenticator) {
+    private AuthzClient(Configuration configuration) {
         if (configuration == null) {
             throw new IllegalArgumentException("Client configuration can not be null.");
         }
@@ -253,10 +242,10 @@ public class AuthzClient {
             throw new IllegalArgumentException("Configuration URL can not be null.");
         }
 
-        configurationUrl = KeycloakUriBuilder.fromUri(configurationUrl).clone().path(AUTHZ_DISCOVERY_URL).build(configuration.getRealm()).toString(); 
+        configurationUrl = KeycloakUriBuilder.fromUri(configurationUrl).clone().path(AUTHZ_DISCOVERY_URL).build(configuration.getRealm()).toString();
         this.configuration = configuration;
 
-        this.http = new Http(configuration, authenticator != null ? authenticator : configuration.getClientAuthenticator());
+        this.http = new Http(configuration, configuration.getClientCredentialsProvider());
 
         try {
             this.serverConfiguration = this.http.<ServerConfiguration>get(configurationUrl)
@@ -265,18 +254,16 @@ public class AuthzClient {
         } catch (Exception e) {
             throw new RuntimeException("Could not obtain configuration from server [" + configurationUrl + "].", e);
         }
-
-        this.http.setServerConfiguration(this.serverConfiguration);
     }
 
-    private TokenCallable createPatSupplier(String userName, String password) {
+    public TokenCallable createPatSupplier(String userName, String password) {
         if (patSupplier == null) {
             patSupplier = createRefreshableAccessTokenSupplier(userName, password);
         }
         return patSupplier;
     }
 
-    private TokenCallable createPatSupplier() {
+    public TokenCallable createPatSupplier() {
         return createPatSupplier(null, null);
     }
 

@@ -17,14 +17,13 @@
 
 package org.keycloak.admin.client;
 
-import static org.keycloak.OAuth2Constants.CLIENT_CREDENTIALS;
 import static org.keycloak.OAuth2Constants.PASSWORD;
 
-import javax.ws.rs.client.Client;
+import jakarta.ws.rs.client.Client;
 
 /**
  * Provides a {@link Keycloak} client builder with the ability to customize the underlying
- * {@link javax.ws.rs.client.Client RESTEasy client} used to communicate with the Keycloak server.
+ * {@link jakarta.ws.rs.client.Client RESTEasy client} used to communicate with the Keycloak server.
  * <p>
  * <p>Example usage with a connection pool size of 20:</p>
  * <pre>
@@ -35,7 +34,10 @@ import javax.ws.rs.client.Client;
  *     .password("pass")
  *     .clientId("client")
  *     .clientSecret("secret")
- *     .resteasyClient(new ResteasyClientBuilder().connectionPoolSize(20).build())
+ *     .resteasyClient(new ResteasyClientBuilderImpl()
+ *                 .connectionPoolSize(20)
+ *                 .build()
+ *                 .register(org.keycloak.admin.client.JacksonProvider.class, 100))
  *     .build();
  * </pre>
  * <p>Example usage with grant_type=client_credentials</p>
@@ -50,7 +52,7 @@ import javax.ws.rs.client.Client;
  * </pre>
  *
  * @author Scott Rossillo
- * @see javax.ws.rs.client.Client
+ * @see jakarta.ws.rs.client.Client
  */
 public class KeycloakBuilder {
     private String serverUrl;
@@ -63,6 +65,7 @@ public class KeycloakBuilder {
     private Client resteasyClient;
     private String authorization;
     private String scope;
+    private boolean useDPoP = false;
 
     public KeycloakBuilder serverUrl(String serverUrl) {
         this.serverUrl = serverUrl;
@@ -105,6 +108,12 @@ public class KeycloakBuilder {
         return this;
     }
 
+    /**
+     * Custom instance of resteasy client. Please see <a href="https://www.keycloak.org/securing-apps/admin-client#_admin_client_compatibility">the documentation</a> for additional details regarding the compatibility
+     *
+     * @param resteasyClient Custom RestEasy client
+     * @return admin client builder
+     */
     public KeycloakBuilder resteasyClient(Client resteasyClient) {
         this.resteasyClient = resteasyClient;
         return this;
@@ -112,6 +121,17 @@ public class KeycloakBuilder {
 
     public KeycloakBuilder authorization(String auth) {
         this.authorization = auth;
+        return this;
+    }
+
+    /**
+     * @param useDPoP If true, then admin-client will add DPoP proofs to the token-requests and to the admin REST API requests. DPoP feature must be
+     *                enabled on Keycloak server side to work properly. It is false by default. Parameter is supposed to be used with Keycloak server 26.4.0 or later as
+     *                earlier versions did not support DPoP requests for admin REST API
+     * @return admin client builder
+     */
+    public KeycloakBuilder useDPoP(boolean useDPoP) {
+        this.useDPoP = useDPoP;
         return this;
     }
 
@@ -139,17 +159,13 @@ public class KeycloakBuilder {
             if (password == null) {
                 throw new IllegalStateException("password required");
             }
-        } else if (CLIENT_CREDENTIALS.equals(grantType)) {
-            if (clientSecret == null) {
-                throw new IllegalStateException("clientSecret required with grant_type=client_credentials");
-            }
         }
 
         if (authorization == null && clientId == null) {
             throw new IllegalStateException("clientId required");
         }
 
-        return new Keycloak(serverUrl, realm, username, password, clientId, clientSecret, grantType, resteasyClient, authorization, scope);
+        return new Keycloak(serverUrl, realm, username, password, clientId, clientSecret, grantType, resteasyClient, authorization, scope, useDPoP);
     }
 
     private KeycloakBuilder() {

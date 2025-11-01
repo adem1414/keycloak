@@ -19,6 +19,7 @@ package org.keycloak.federation.kerberos;
 
 import org.jboss.logging.Logger;
 import org.keycloak.Config;
+import org.keycloak.common.Profile;
 import org.keycloak.common.constants.KerberosConstants;
 import org.keycloak.component.ComponentModel;
 import org.keycloak.federation.kerberos.impl.KerberosServerSubjectAuthenticator;
@@ -29,6 +30,7 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.LDAPConstants;
 import org.keycloak.models.RealmModel;
+import org.keycloak.provider.EnvironmentDependentProviderFactory;
 import org.keycloak.provider.ProviderConfigProperty;
 import org.keycloak.provider.ProviderConfigurationBuilder;
 import org.keycloak.representations.idm.CredentialRepresentation;
@@ -36,6 +38,7 @@ import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.storage.UserStorageProviderFactory;
 import org.keycloak.storage.UserStorageProviderModel;
 import org.keycloak.utils.CredentialHelper;
+import org.keycloak.component.ComponentValidationException;
 
 import java.util.List;
 
@@ -45,7 +48,7 @@ import java.util.List;
  *
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
  */
-public class KerberosFederationProviderFactory implements UserStorageProviderFactory<KerberosFederationProvider> {
+public class KerberosFederationProviderFactory implements UserStorageProviderFactory<KerberosFederationProvider>, EnvironmentDependentProviderFactory {
 
     private static final Logger logger = Logger.getLogger(KerberosFederationProviderFactory.class);
     public static final String PROVIDER_NAME = "kerberos";
@@ -58,6 +61,11 @@ public class KerberosFederationProviderFactory implements UserStorageProviderFac
     @Override
     public String getId() {
         return PROVIDER_NAME;
+    }
+
+    @Override
+    public boolean isSupported(Config.Scope config) {
+        return Profile.isFeatureEnabled(Profile.Feature.KERBEROS);
     }
 
     protected static final List<ProviderConfigProperty> configProperties;
@@ -160,5 +168,24 @@ public class KerberosFederationProviderFactory implements UserStorageProviderFac
     public void preRemove(KeycloakSession session, RealmModel realm, ComponentModel model) {
         CredentialHelper.setOrReplaceAuthenticationRequirement(session, realm, CredentialRepresentation.KERBEROS,
                 AuthenticationExecutionModel.Requirement.DISABLED, null);
+    }
+
+    @Override
+    public void validateConfiguration(KeycloakSession session, RealmModel realm, ComponentModel config) throws ComponentValidationException {
+        // Trim whitespace from string configuration values
+        trimConfigValue(config, KerberosConstants.SERVER_PRINCIPAL);
+        trimConfigValue(config, KerberosConstants.KERBEROS_REALM);
+        trimConfigValue(config, KerberosConstants.KEYTAB);
+    }
+
+    private void trimConfigValue(ComponentModel config, String configKey) {
+        String value = config.getConfig().getFirst(configKey);
+        if (value != null) {
+            String trimmedValue = value.trim();
+            if (!value.equals(trimmedValue)) {
+                // Update the config with trimmed value
+                config.getConfig().putSingle(configKey, trimmedValue);
+            }
+        }
     }
 }

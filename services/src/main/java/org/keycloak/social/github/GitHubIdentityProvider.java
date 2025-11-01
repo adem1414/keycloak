@@ -18,17 +18,28 @@
 package org.keycloak.social.github;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
+import jakarta.ws.rs.core.Response;
+
+import java.io.IOException;
 import java.util.Iterator;
+import java.util.Map;
+
+import org.keycloak.OAuth2Constants;
+import org.keycloak.OAuthErrorException;
 import org.keycloak.broker.oidc.AbstractOAuth2IdentityProvider;
 import org.keycloak.broker.oidc.OAuth2IdentityProviderConfig;
 import org.keycloak.broker.oidc.mappers.AbstractJsonUserAttributeMapper;
 import org.keycloak.broker.provider.BrokeredIdentityContext;
 import org.keycloak.broker.provider.IdentityBrokerException;
-import org.keycloak.broker.provider.util.SimpleHttp;
 import org.keycloak.broker.social.SocialIdentityProvider;
 import org.keycloak.events.EventBuilder;
+import org.keycloak.http.simple.SimpleHttp;
+import org.keycloak.http.simple.SimpleHttpRequest;
+import org.keycloak.http.simple.SimpleHttpResponse;
 import org.keycloak.models.KeycloakSession;
+import org.keycloak.protocol.oidc.TokenExchangeContext;
+import org.keycloak.services.ErrorResponseException;
+import org.keycloak.util.BasicAuthHelper;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -48,8 +59,10 @@ public class GitHubIdentityProvider extends AbstractOAuth2IdentityProvider imple
     public static final String TOKEN_URL = DEFAULT_TOKEN_URL;
 
     public static final String DEFAULT_API_URL = "https://api.github.com";
+    public static final String APPLICATIONS_FRAGMENT = "/applications";
     public static final String PROFILE_FRAGMENT = "/user";
     public static final String EMAIL_FRAGMENT = "/user/emails";
+    public static final String DEFAULT_APPLICATIONS_URL = DEFAULT_API_URL + APPLICATIONS_FRAGMENT;
     public static final String DEFAULT_PROFILE_URL = DEFAULT_API_URL + PROFILE_FRAGMENT;
     public static final String DEFAULT_EMAIL_URL = DEFAULT_API_URL + EMAIL_FRAGMENT;
     /** @deprecated Use {@link #DEFAULT_PROFILE_URL} instead. */
@@ -65,6 +78,8 @@ public class GitHubIdentityProvider extends AbstractOAuth2IdentityProvider imple
     protected static final String BASE_URL_KEY = "baseUrl";
     /** API URL key in config map. */
     protected static final String API_URL_KEY = "apiUrl";
+    /** API URL key in config map. */
+    protected static final String GITHUB_JSON_FORMAT_KEY = "githubJsonFormat";
     /** Email URL key in config map. */
     protected static final String EMAIL_URL_KEY = "emailUrl";
 
@@ -72,6 +87,7 @@ public class GitHubIdentityProvider extends AbstractOAuth2IdentityProvider imple
     private final String tokenUrl;
     private final String profileUrl;
     private final String emailUrl;
+    private final boolean githubJsonFormat;
 
     public GitHubIdentityProvider(KeycloakSession session, OAuth2IdentityProviderConfig config) {
         super(session, config);
@@ -88,6 +104,7 @@ public class GitHubIdentityProvider extends AbstractOAuth2IdentityProvider imple
         config.setTokenUrl(tokenUrl);
         config.setUserInfoUrl(profileUrl);
         config.getConfig().put(EMAIL_URL_KEY, emailUrl);
+        githubJsonFormat = Boolean.parseBoolean(config.getConfig().getOrDefault(GITHUB_JSON_FORMAT_KEY, "false"));
     }
 
     /**
@@ -119,15 +136,23 @@ public class GitHubIdentityProvider extends AbstractOAuth2IdentityProvider imple
 		return profileUrl;
 	}
 
-	@Override
+    @Override
+    public SimpleHttpRequest authenticateTokenRequest(SimpleHttpRequest tokenRequest) {
+        SimpleHttpRequest simpleHttp = super.authenticateTokenRequest(tokenRequest);
+        if (githubJsonFormat) {
+            simpleHttp.acceptJson();
+        }
+        return simpleHttp;
+    }
+
+    @Override
 	protected BrokeredIdentityContext extractIdentityFromProfile(EventBuilder event, JsonNode profile) {
-		BrokeredIdentityContext user = new BrokeredIdentityContext(getJsonProperty(profile, "id"));
+		BrokeredIdentityContext user = new BrokeredIdentityContext(getJsonProperty(profile, "id"), getConfig());
 
 		String username = getJsonProperty(profile, "login");
 		user.setUsername(username);
 		user.setName(getJsonProperty(profile, "name"));
 		user.setEmail(getJsonProperty(profile, "email"));
-		user.setIdpConfig(getConfig());
 		user.setIdp(this);
 
 		AbstractJsonUserAttributeMapper.storeUserProfileForMapper(user, profile, getConfig().getAlias());
@@ -137,39 +162,98 @@ public class GitHubIdentityProvider extends AbstractOAuth2IdentityProvider imple
 
 	@Override
 	protected BrokeredIdentityContext doGetFederatedIdentity(String accessToken) {
-		try {
-			JsonNode profile = SimpleHttp.doGet(profileUrl, session).header("Authorization", "Bearer " + accessToken).asJson();
+		try (SimpleHttpResponse response = SimpleHttp.create(session).doGet(profileUrl)
+                        .header("Authorization", "Bearer " + accessToken)
+                        .header("Accept", "application/json")
+                        .asResponse()) {
 
-			BrokeredIdentityContext user = extractIdentityFromProfile(null, profile);
+                    if (Response.Status.fromStatusCode(response.getStatus()).getFamily() != Response.Status.Family.SUCCESSFUL) {
+                        logger.warnf("Profile endpoint returned an error (%d): %s", response.getStatus(), response.asString());
+                        throw new IdentityBrokerException("Profile could not be retrieved from the github endpoint");
+                    }
 
-			if (user.getEmail() == null) {
-				user.setEmail(searchEmail(accessToken));
-			}
+                    JsonNode profile = response.asJson();
+                    logger.tracef("profile retrieved from github: %s", profile);
+                    BrokeredIdentityContext user = extractIdentityFromProfile(null, profile);
 
-			return user;
+                    if (user.getEmail() == null) {
+                        user.setEmail(searchEmail(accessToken));
+                    }
+                    return user;
 		} catch (Exception e) {
-			throw new IdentityBrokerException("Could not obtain user profile from github.", e);
+			throw new IdentityBrokerException("Profile could not be retrieved from the github endpoint", e);
 		}
 	}
 
 	private String searchEmail(String accessToken) {
-		try {
-			ArrayNode emails = (ArrayNode) SimpleHttp.doGet(emailUrl, session).header("Authorization", "Bearer " + accessToken).asJson();
+		try (SimpleHttpResponse response = SimpleHttp.create(session).doGet(emailUrl)
+                        .header("Authorization", "Bearer " + accessToken)
+                        .header("Accept", "application/json")
+                        .asResponse()) {
 
-			Iterator<JsonNode> loop = emails.elements();
-			while (loop.hasNext()) {
-				JsonNode mail = loop.next();
-				if (mail.get("primary").asBoolean()) {
-					return getJsonProperty(mail, "email");
-				}
-			}
+                    if (Response.Status.fromStatusCode(response.getStatus()).getFamily() != Response.Status.Family.SUCCESSFUL) {
+                        logger.warnf("Primary email endpoint returned an error (%d): %s", response.getStatus(), response.asString());
+                        throw new IdentityBrokerException("Primary email could not be retrieved from the github endpoint");
+                    }
+
+                    JsonNode emails = response.asJson();
+                    logger.tracef("emails retrieved from github: %s", emails);
+                    if (emails.isArray()) {
+                        Iterator<JsonNode> loop = emails.elements();
+                        while (loop.hasNext()) {
+                            JsonNode mail = loop.next();
+                            JsonNode primary = mail.get("primary");
+                            if (primary != null && primary.asBoolean()) {
+                                return getJsonProperty(mail, "email");
+                            }
+                        }
+                    }
+
+                    throw new IdentityBrokerException("Primary email from github is not found in the user's email list.");
 		} catch (Exception e) {
-			throw new IdentityBrokerException("Could not obtain user email from github.", e);
+			throw new IdentityBrokerException("Primary email could not be retrieved from the github endpoint", e);
 		}
-		throw new IdentityBrokerException("Primary email from github is not found.");
 	}
 
-	@Override
+    private void verifyToken(String accessToken) throws IOException {
+        String tokenUrl = DEFAULT_APPLICATIONS_URL + "/" + getConfig().getClientId() + "/token";
+        SimpleHttpResponse response = SimpleHttp.create(session).doPost(tokenUrl)
+                .header("Authorization",  BasicAuthHelper.createHeader(getConfig().getClientId(), getConfig().getClientSecret()))
+                .json(Map.of("access_token", accessToken)).asResponse();
+
+        JsonNode jsonNodeResponse = response.asJson();
+        if (response.getStatus() != 200) {
+            String errorMessage = getJsonProperty(jsonNodeResponse, "message");
+            throw new RuntimeException("Error message: " + errorMessage);
+        }
+
+        JsonNode appNode = jsonNodeResponse.get("app");
+        if (appNode == null || appNode.isNull()) {
+            throw new RuntimeException("Invalid token check response: 'app' field is missing.");
+        }
+
+        String clientId = getJsonProperty(appNode, "client_id");
+        if (!getConfig().getClientId().equals(clientId)) {
+            throw new RuntimeException("Client ID does not match the client_id in the access token check response.");
+        }
+    }
+
+    @Override
+    protected BrokeredIdentityContext exchangeExternalTokenV2Impl(TokenExchangeContext tokenExchangeContext) {
+        String subjectToken = tokenExchangeContext.getFormParams().getFirst(OAuth2Constants.SUBJECT_TOKEN);
+        if (subjectToken == null) {
+            throw new ErrorResponseException(OAuthErrorException.INVALID_TOKEN, "token not set", Response.Status.BAD_REQUEST);
+        }
+        try {
+            verifyToken(subjectToken);
+            return doGetFederatedIdentity(subjectToken);
+        }
+        catch (Exception e) {
+            throw new ErrorResponseException(OAuthErrorException.INVALID_TOKEN, e.getMessage(), Response.Status.BAD_REQUEST);
+        }
+    }
+
+    @Override
 	protected String getDefaultScopes() {
 		return DEFAULT_SCOPE;
 	}

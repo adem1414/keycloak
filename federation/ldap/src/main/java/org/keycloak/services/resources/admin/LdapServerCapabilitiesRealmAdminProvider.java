@@ -23,7 +23,7 @@ import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.RealmModel;
 import org.keycloak.services.resources.admin.ext.AdminRealmResourceProvider;
 import org.keycloak.services.resources.admin.ext.AdminRealmResourceProviderFactory;
-import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
+import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
 
 public class LdapServerCapabilitiesRealmAdminProvider implements AdminRealmResourceProviderFactory, AdminRealmResourceProvider {
 
@@ -51,7 +51,7 @@ public class LdapServerCapabilitiesRealmAdminProvider implements AdminRealmResou
 
     @Override
     public Object getResource(KeycloakSession session, RealmModel realm, AdminPermissionEvaluator auth, AdminEventBuilder adminEvent) {
-        return new LdapServerCapabilitiesResource(realm, auth, adminEvent);
+        return new LdapServerCapabilitiesResource(session, auth, adminEvent);
     }
 
 }

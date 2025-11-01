@@ -16,7 +16,12 @@
 
 package org.keycloak.authentication.requiredactions;
 
-import com.webauthn4j.validator.attestation.trustworthiness.certpath.CertPathTrustworthinessValidator;
+import com.webauthn4j.anchor.KeyStoreTrustAnchorRepository;
+import com.webauthn4j.verifier.attestation.trustworthiness.certpath.CertPathTrustworthinessVerifier;
+import com.webauthn4j.verifier.attestation.trustworthiness.certpath.DefaultCertPathTrustworthinessVerifier;
+import com.webauthn4j.verifier.attestation.trustworthiness.certpath.NullCertPathTrustworthinessVerifier;
+
+import org.keycloak.Config;
 import org.keycloak.Config.Scope;
 import org.keycloak.authentication.RequiredActionFactory;
 import org.keycloak.authentication.RequiredActionProvider;
@@ -25,11 +30,6 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.provider.EnvironmentDependentProviderFactory;
 import org.keycloak.truststore.TruststoreProvider;
-
-import com.webauthn4j.anchor.KeyStoreTrustAnchorsProvider;
-import com.webauthn4j.anchor.TrustAnchorsResolverImpl;
-import com.webauthn4j.validator.attestation.trustworthiness.certpath.NullCertPathTrustworthinessValidator;
-import com.webauthn4j.validator.attestation.trustworthiness.certpath.TrustAnchorCertPathTrustworthinessValidator;
 
 public class WebAuthnRegisterFactory implements RequiredActionFactory, EnvironmentDependentProviderFactory {
 
@@ -40,19 +40,17 @@ public class WebAuthnRegisterFactory implements RequiredActionFactory, Environme
         WebAuthnRegister webAuthnRegister = null;
         TruststoreProvider truststoreProvider = session.getProvider(TruststoreProvider.class);
         if (truststoreProvider == null || truststoreProvider.getTruststore() == null) {
-            webAuthnRegister = createProvider(session, new NullCertPathTrustworthinessValidator());
+            webAuthnRegister = createProvider(session, new NullCertPathTrustworthinessVerifier());
         } else {
-            KeyStoreTrustAnchorsProvider trustAnchorsProvider = new KeyStoreTrustAnchorsProvider();
-            trustAnchorsProvider.setKeyStore(truststoreProvider.getTruststore());
-            TrustAnchorsResolverImpl resolverImpl = new TrustAnchorsResolverImpl(trustAnchorsProvider);
-            TrustAnchorCertPathTrustworthinessValidator trustValidator = new TrustAnchorCertPathTrustworthinessValidator(resolverImpl);
-            webAuthnRegister = createProvider(session, trustValidator);
+            KeyStoreTrustAnchorRepository keyStoreTrustAnchorRepository = new KeyStoreTrustAnchorRepository(truststoreProvider.getTruststore());
+            DefaultCertPathTrustworthinessVerifier trustVerifier = new DefaultCertPathTrustworthinessVerifier(keyStoreTrustAnchorRepository);
+            webAuthnRegister = createProvider(session, trustVerifier);
         }
         return webAuthnRegister;
     }
 
-    protected WebAuthnRegister createProvider(KeycloakSession session, CertPathTrustworthinessValidator trustValidator) {
-         return new WebAuthnRegister(session, trustValidator);
+    protected WebAuthnRegister createProvider(KeycloakSession session, CertPathTrustworthinessVerifier trustVerifier) {
+         return new WebAuthnRegister(session, trustVerifier);
     }
 
     @Override
@@ -81,7 +79,7 @@ public class WebAuthnRegisterFactory implements RequiredActionFactory, Environme
     }
 
     @Override
-    public boolean isSupported() {
+    public boolean isSupported(Config.Scope config) {
         return Profile.isFeatureEnabled(Profile.Feature.WEB_AUTHN);
     }
 }

@@ -18,8 +18,10 @@
 package org.keycloak.provider;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Builds a list of ProviderConfigProperty instances.
@@ -30,6 +32,7 @@ import java.util.List;
 public class ProviderConfigurationBuilder {
 
     private List<ProviderConfigProperty> properties = new LinkedList<>();
+    private Set<String> propertyNames = new HashSet<>();
 
     private ProviderConfigurationBuilder() {
     }
@@ -43,7 +46,7 @@ public class ProviderConfigurationBuilder {
     }
 
     public ProviderConfigurationBuilder property(ProviderConfigProperty property) {
-        properties.add(property);
+        add(property);
         return this;
     }
 
@@ -51,13 +54,13 @@ public class ProviderConfigurationBuilder {
         ProviderConfigProperty property = new ProviderConfigProperty(name, label, helpText, type, defaultValue);
         property.setOptions(options);
         property.setSecret(secret);
-        properties.add(property);
+        add(property);
         return this;
     }
     public ProviderConfigurationBuilder property(String name, String label, String helpText, String type, Object defaultValue, List<String> options) {
         ProviderConfigProperty property = new ProviderConfigProperty(name, label, helpText, type, defaultValue);
         property.setOptions(options);
-        properties.add(property);
+        add(property);
         return this;
     }
 
@@ -79,6 +82,7 @@ public class ProviderConfigurationBuilder {
         private Object defaultValue;
         private List<String> options;
         private boolean secret;
+        private boolean required;
 
         public ProviderConfigPropertyBuilder name(String name) {
             this.name = name;
@@ -169,6 +173,17 @@ public class ProviderConfigurationBuilder {
         }
 
         /**
+         * If turned on, this property will be marked as required in the admin console
+         *
+         * @param required
+         * @return
+         */
+        public ProviderConfigPropertyBuilder required(boolean required) {
+            this.required = required;
+            return this;
+        }
+
+        /**
          * Add the current property, and start building the next one
          *
          * @return
@@ -182,10 +197,19 @@ public class ProviderConfigurationBuilder {
             property.setDefaultValue(defaultValue);
             property.setOptions(options);
             property.setSecret(secret);
-            ProviderConfigurationBuilder.this.properties.add(property);
+            property.setRequired(required);
+            ProviderConfigurationBuilder.this.add(property);
             return ProviderConfigurationBuilder.this;
         }
 
     }
+
+  private boolean add(ProviderConfigProperty property) {
+    String name = property.getName();
+    if (!propertyNames.add(name)) {
+      throw new ProviderConfigPropertyNameNotUniqueException("ProviderConfigProperty with name '" + name + "' already exists.");
+    }
+    return properties.add(property);
+  }
 
 }

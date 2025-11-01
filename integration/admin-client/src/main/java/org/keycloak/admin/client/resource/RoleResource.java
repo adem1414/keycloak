@@ -23,16 +23,16 @@ import org.keycloak.representations.idm.ManagementPermissionRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.MediaType;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
 import java.util.List;
 import java.util.Set;
 
@@ -102,36 +102,57 @@ public interface RoleResource {
     void deleteComposites(List<RoleRepresentation> rolesToRemove);
 
     /**
-     * Get role members
-     * <p/>
-     * Returns users that have the given role
+     * Get role members.
+     * <p>
+     * Returns users that have the given role, sorted by username ascending.
+     * </p>
+     * <p>
+     * Note: This method just returns the first 100 users. In order to retrieve all users, use paging (see
+     * {@link #getUserMembers(Integer, Integer)}).
+     * </p>
      *
      * @return a list of users with the given role
      */
     @GET
     @Path("users")
     @Produces(MediaType.APPLICATION_JSON)
-    Set<UserRepresentation> getRoleUserMembers();
+    List<UserRepresentation> getUserMembers();
 
     /**
-     * Get role members
-     * <p/>
-     * Returns users that have the given role, paginated according to the query parameters
+     * Get role members.
+     * <p>Returns users that have the given role, sorted by username ascending, paginated according to the query
+     * parameters.</p>
      *
      * @param firstResult Pagination offset
-     * @param maxResults  Pagination size
+     * @param maxResults Pagination size
      * @return a list of users with the given role
      */
     @GET
     @Path("users")
     @Produces(MediaType.APPLICATION_JSON)
-    Set<UserRepresentation> getRoleUserMembers(@QueryParam("first") Integer firstResult,
-                                               @QueryParam("max") Integer maxResults);
-    
+    List<UserRepresentation> getUserMembers(@QueryParam("first") Integer firstResult,
+            @QueryParam("max") Integer maxResults);
+
     /**
-     * Get role groups
-     * <p/>
-     * Returns groups that have the given role
+     * Get role members.
+     * <p>Returns users that have the given role, sorted by username ascending, paginated according to the query
+     * parameters.</p>
+     *
+     * @param briefRepresentation If the user should be returned in brief or full representation. Parameter available since Keycloak server 26. Will be ignored on older Keycloak versions with the default value false.
+     * @param firstResult Pagination offset
+     * @param maxResults Pagination size
+     * @return a list of users with the given role
+     */
+    @GET
+    @Path("users")
+    @Produces(MediaType.APPLICATION_JSON)
+    List<UserRepresentation> getUserMembers(@QueryParam("briefRepresentation") Boolean briefRepresentation,
+            @QueryParam("first") Integer firstResult,
+            @QueryParam("max") Integer maxResults);
+
+    /**
+     * Get role groups.
+     * <p>Returns groups that have the given role.</p>
      *
      * @return a list of groups with the given role
      */
@@ -141,9 +162,8 @@ public interface RoleResource {
     Set<GroupRepresentation> getRoleGroupMembers();
 
     /**
-     * Get role groups
-     * <p/>
-     * Returns groups that have the given role, paginated according to the query parameters
+     * Get role groups.
+     * <p>Returns groups that have the given role, paginated according to the query parameters.</p>
      *
      * @param firstResult Pagination offset
      * @param maxResults  Pagination size
@@ -153,5 +173,36 @@ public interface RoleResource {
     @Path("groups")
     @Produces(MediaType.APPLICATION_JSON)
     Set<GroupRepresentation> getRoleGroupMembers(@QueryParam("first") Integer firstResult,
+                                               @QueryParam("max") Integer maxResults);
+
+    /**
+     * Get role members.
+     * <p>Returns users that have the given role.</p>
+     *
+     * @return a set of users with the given role
+     *
+     * @deprecated please use {@link #getUserMembers()}
+     */
+    @GET
+    @Path("users")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Deprecated
+    Set<UserRepresentation> getRoleUserMembers();
+
+    /**
+     * Get role members.
+     * <p>Returns users that have the given role, paginated according to the query parameters.</p>
+     *
+     * @param firstResult Pagination offset
+     * @param maxResults  Pagination size
+     * @return a set of users with the given role
+     *
+     * @deprecated please use {@link #getUserMembers(Integer, Integer)}
+     */
+    @GET
+    @Path("users")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Deprecated
+    Set<UserRepresentation> getRoleUserMembers(@QueryParam("first") Integer firstResult,
                                                @QueryParam("max") Integer maxResults);
 }

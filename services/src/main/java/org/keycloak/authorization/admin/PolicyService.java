@@ -24,20 +24,26 @@ import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import javax.ws.rs.Consumes;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.Response.Status;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response.Status;
 
-import org.jboss.resteasy.annotations.cache.NoCache;
-import org.jboss.resteasy.spi.ResteasyProviderFactory;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponses;
+import org.jboss.resteasy.reactive.NoCache;
+import org.keycloak.authorization.fgap.AdminPermissionsSchema;
 import org.keycloak.authorization.AuthorizationProvider;
 import org.keycloak.authorization.model.Policy;
 import org.keycloak.authorization.model.Resource;
@@ -49,6 +55,7 @@ import org.keycloak.authorization.store.PolicyStore;
 import org.keycloak.authorization.store.ResourceStore;
 import org.keycloak.authorization.store.ScopeStore;
 import org.keycloak.authorization.store.StoreFactory;
+import org.keycloak.common.Profile.Feature;
 import org.keycloak.events.admin.OperationType;
 import org.keycloak.events.admin.ResourceType;
 import org.keycloak.models.Constants;
@@ -58,13 +65,16 @@ import org.keycloak.representations.idm.authorization.AbstractPolicyRepresentati
 import org.keycloak.representations.idm.authorization.PolicyProviderRepresentation;
 import org.keycloak.representations.idm.authorization.PolicyRepresentation;
 import org.keycloak.services.ErrorResponseException;
-import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
+import org.keycloak.services.resources.KeycloakOpenAPI;
 import org.keycloak.services.resources.admin.AdminEventBuilder;
+import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
 import org.keycloak.util.JsonSerialization;
+import org.keycloak.utils.StringUtil;
 
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
  */
+@Extension(name = KeycloakOpenAPI.Profiles.ADMIN, value = "")
 public class PolicyService {
 
     protected final ResourceServer resourceServer;
@@ -84,10 +94,15 @@ public class PolicyService {
         PolicyProviderFactory providerFactory = getPolicyProviderFactory(type);
 
         if (providerFactory != null) {
+            checkIfSupportedPolicyType(type);
             return doCreatePolicyTypeResource(type);
         }
 
-        Policy policy = authorization.getStoreFactory().getPolicyStore().findById(resourceServer.getRealm(), resourceServer, type);
+        Policy policy = authorization.getStoreFactory().getPolicyStore().findById(resourceServer, type);
+
+        if (policy != null) {
+            checkIfSupportedPolicyType(policy.getType());
+        }
 
         return doCreatePolicyResource(policy);
     }
@@ -104,9 +119,10 @@ public class PolicyService {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @NoCache
-    public Response create(String payload, @Context KeycloakSession session) {
+    @APIResponse(responseCode = "201", description = "Created")
+    public Response create(String payload) {
         if (auth != null) {
-            this.auth.realm().requireManageAuthorization();
+            this.auth.realm().requireManageAuthorization(resourceServer);
         }
 
         AbstractPolicyRepresentation representation = doCreateRepresentation(payload);
@@ -114,7 +130,7 @@ public class PolicyService {
 
         representation.setId(policy.getId());
 
-        audit(representation, representation.getId(), OperationType.CREATE, session);
+        audit(representation, representation.getId(), OperationType.CREATE, authorization.getKeycloakSession());
 
         return Response.status(Status.CREATED).entity(representation).build();
     }
@@ -127,6 +143,8 @@ public class PolicyService {
         } catch (IOException cause) {
             throw new RuntimeException("Failed to deserialize representation", cause);
         }
+
+        checkIfSupportedPolicyType(representation.getType());
 
         return representation;
     }
@@ -146,9 +164,17 @@ public class PolicyService {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @NoCache
+    @APIResponses(value = {
+        @APIResponse(
+            responseCode = "200",
+            content = @Content(schema = @Schema(implementation = AbstractPolicyRepresentation.class))
+        ),
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "400", description = "Bad Request")
+    })
     public Response findByName(@QueryParam("name") String name, @QueryParam("fields") String fields) {
         if (auth != null) {
-            this.auth.realm().requireViewAuthorization();
+            this.auth.realm().requireViewAuthorization(resourceServer);
         }
 
         StoreFactory storeFactory = authorization.getStoreFactory();
@@ -169,9 +195,17 @@ public class PolicyService {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @NoCache
+    @APIResponses(value = {
+        @APIResponse(
+            responseCode = "200",
+            content = @Content(schema = @Schema(implementation = AbstractPolicyRepresentation.class, type = SchemaType.ARRAY))
+        ),
+        @APIResponse(responseCode = "204", description = "No Content")
+    })
     public Response findAll(@QueryParam("policyId") String id,
                             @QueryParam("name") String name,
                             @QueryParam("type") String type,
+                            @QueryParam("resourceType") String resourceType,
                             @QueryParam("resource") String resource,
                             @QueryParam("scope") String scope,
                             @QueryParam("permission") Boolean permission,
@@ -180,7 +214,7 @@ public class PolicyService {
                             @QueryParam("first") Integer firstResult,
                             @QueryParam("max") Integer maxResult) {
         if (auth != null) {
-            this.auth.realm().requireViewAuthorization();
+            this.auth.realm().requireViewAuthorization(resourceServer);
         }
 
         Map<Policy.FilterOption, String[]> search = new EnumMap<>(Policy.FilterOption.class);
@@ -205,7 +239,7 @@ public class PolicyService {
 
         if (resource != null && !"".equals(resource.trim())) {
             ResourceStore resourceStore = storeFactory.getResourceStore();
-            Resource resourceModel = resourceStore.findById(resourceServer.getRealm(), resourceServer, resource);
+            Resource resourceModel = resourceStore.findById(resourceServer, resource);
 
             if (resourceModel == null) {
                 Map<Resource.FilterOption, String[]> resourceFilters = new EnumMap<>(Resource.FilterOption.class);
@@ -216,7 +250,7 @@ public class PolicyService {
                     resourceFilters.put(Resource.FilterOption.OWNER, new String[]{owner});
                 }
 
-                Set<String> resources = resourceStore.find(resourceServer.getRealm(), resourceServer, resourceFilters, -1, 1).stream().map(Resource::getId).collect(Collectors.toSet());
+                Set<String> resources = resourceStore.find(resourceServer, resourceFilters, -1, 1).stream().map(Resource::getId).collect(Collectors.toSet());
 
                 if (resources.isEmpty()) {
                     return Response.noContent().build();
@@ -230,7 +264,7 @@ public class PolicyService {
 
         if (scope != null && !"".equals(scope.trim())) {
             ScopeStore scopeStore = storeFactory.getScopeStore();
-            Scope scopeModel = scopeStore.findById(resourceServer.getRealm(), resourceServer, scope);
+            Scope scopeModel = scopeStore.findById(resourceServer, scope);
 
             if (scopeModel == null) {
                 Map<Scope.FilterOption, String[]> scopeFilters = new EnumMap<>(Scope.FilterOption.class);
@@ -253,18 +287,23 @@ public class PolicyService {
             search.put(Policy.FilterOption.PERMISSION, new String[] {permission.toString()});
         }
 
+        if (StringUtil.isNotBlank(resourceType)) {
+            search.put(Policy.FilterOption.CONFIG, new String[] {"defaultResourceType", resourceType});
+        }
+
         return Response.ok(
                 doSearch(firstResult, maxResult, fields, search))
                 .build();
     }
 
     protected AbstractPolicyRepresentation toRepresentation(Policy model, String fields, AuthorizationProvider authorization) {
+        checkIfSupportedPolicyType(model.getType());
         return ModelToRepresentation.toRepresentation(model, authorization, true, false, fields != null && fields.equals("*"));
     }
 
     protected List<Object> doSearch(Integer firstResult, Integer maxResult, String fields, Map<Policy.FilterOption, String[]> filters) {
         PolicyStore policyStore = authorization.getStoreFactory().getPolicyStore();
-        return policyStore.find(resourceServer.getRealm(), resourceServer, filters, firstResult != null ? firstResult : -1, maxResult != null ? maxResult : Constants.DEFAULT_MAX_RESULTS).stream()
+        return policyStore.find(resourceServer, filters, firstResult != null ? firstResult : -1, maxResult != null ? maxResult : Constants.DEFAULT_MAX_RESULTS).stream()
                 .map(policy -> toRepresentation(policy, fields, authorization))
                 .collect(Collectors.toList());
     }
@@ -273,9 +312,13 @@ public class PolicyService {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @NoCache
+    @APIResponse(
+        responseCode = "200",
+        content = @Content(schema = @Schema(implementation = PolicyProviderRepresentation.class, type = SchemaType.ARRAY))
+    )
     public Response findPolicyProviders() {
         if (auth != null) {
-            this.auth.realm().requireViewAuthorization();
+            this.auth.realm().requireViewAuthorization(resourceServer);
         }
 
         return Response.ok(
@@ -297,14 +340,10 @@ public class PolicyService {
     @Path("evaluate")
     public PolicyEvaluationService getPolicyEvaluateResource() {
         if (auth != null) {
-            this.auth.realm().requireViewAuthorization();
+            this.auth.realm().requireViewAuthorization(resourceServer);
         }
 
-        PolicyEvaluationService resource = new PolicyEvaluationService(this.resourceServer, this.authorization, this.auth);
-
-        ResteasyProviderFactory.getInstance().injectProperties(resource);
-
-        return resource;
+        return new PolicyEvaluationService(this.resourceServer, this.authorization, this.auth);
     }
 
     protected PolicyProviderAdminService getPolicyProviderAdminResource(String policyType) {
@@ -321,5 +360,13 @@ public class PolicyService {
         } else {
             adminEvent.operation(operation).resourcePath(session.getContext().getUri()).representation(resource).success();
         }
+    }
+
+    private void checkIfSupportedPolicyType(String type) throws BadRequestException {
+        if (AdminPermissionsSchema.SCHEMA.isSupportedPolicyType(authorization.getKeycloakSession(), resourceServer, type)) {
+            return;
+        }
+
+        throw new BadRequestException("Policy type not supported by feature " + Feature.ADMIN_FINE_GRAINED_AUTHZ_V2.getVersionedKey());
     }
 }

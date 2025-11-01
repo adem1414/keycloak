@@ -16,6 +16,8 @@
  */
 package org.keycloak.credential;
 
+import java.util.List;
+
 import org.jboss.logging.Logger;
 import org.keycloak.common.util.ObjectUtil;
 import org.keycloak.common.util.Time;
@@ -30,8 +32,6 @@ import org.keycloak.models.credential.dto.OTPCredentialData;
 import org.keycloak.models.credential.dto.OTPSecretData;
 import org.keycloak.models.utils.HmacOTP;
 import org.keycloak.models.utils.TimeBasedOTP;
-
-import java.nio.charset.StandardCharsets;
 
 /**
  * @author <a href="mailto:bill@burkecentral.com">Bill Burke</a>
@@ -66,7 +66,7 @@ public class OTPCredentialProvider implements CredentialProvider<OTPCredentialMo
 
     @Override
     public boolean supportsCredentialType(String credentialType) {
-        return getType().equals(credentialType);
+        return List.of(OTPCredentialModel.TYPE, OTPCredentialModel.TOTP, OTPCredentialModel.HOTP).contains(credentialType);
     }
 
     @Override
@@ -103,7 +103,7 @@ public class OTPCredentialProvider implements CredentialProvider<OTPCredentialMo
 
         if (OTPCredentialModel.HOTP.equals(credentialData.getSubType())) {
             HmacOTP validator = new HmacOTP(credentialData.getDigits(), credentialData.getAlgorithm(), policy.getLookAheadWindow());
-            int counter = validator.validateHOTP(challengeResponse, secretData.getValue(), credentialData.getCounter());
+            int counter = validator.validateHOTP(challengeResponse, otpCredentialModel.getDecodedSecret(), credentialData.getCounter());
             if (counter < 0) {
                 return false;
             }
@@ -112,12 +112,12 @@ public class OTPCredentialProvider implements CredentialProvider<OTPCredentialMo
             return true;
         } else if (OTPCredentialModel.TOTP.equals(credentialData.getSubType())) {
             TimeBasedOTP validator = new TimeBasedOTP(credentialData.getAlgorithm(), credentialData.getDigits(), credentialData.getPeriod(), policy.getLookAheadWindow());
-            final boolean isValid = validator.validateTOTP(challengeResponse, secretData.getValue().getBytes(StandardCharsets.UTF_8));
+            final boolean isValid = validator.validateTOTP(challengeResponse, otpCredentialModel.getDecodedSecret());
 
             if (isValid) {
                 if (policy.isCodeReusable()) return true;
 
-                SingleUseObjectProvider singleUseStore = session.getProvider(SingleUseObjectProvider.class);
+                SingleUseObjectProvider singleUseStore = session.singleUseObjects();
                 final long validLifespan = (long) credentialData.getPeriod() * (2L * policy.getLookAheadWindow() + 1);
                 final String searchKey = credential.getId() + "." + challengeResponse;
 

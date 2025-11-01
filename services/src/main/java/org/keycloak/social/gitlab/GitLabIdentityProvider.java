@@ -25,19 +25,20 @@ import org.keycloak.broker.oidc.OIDCIdentityProviderConfig;
 import org.keycloak.broker.oidc.mappers.AbstractJsonUserAttributeMapper;
 import org.keycloak.broker.provider.BrokeredIdentityContext;
 import org.keycloak.broker.provider.IdentityBrokerException;
-import org.keycloak.broker.provider.util.SimpleHttp;
 import org.keycloak.broker.social.SocialIdentityProvider;
 import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
 import org.keycloak.events.EventBuilder;
+import org.keycloak.http.simple.SimpleHttp;
+import org.keycloak.http.simple.SimpleHttpResponse;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.representations.AccessTokenResponse;
 import org.keycloak.representations.IDToken;
 import org.keycloak.representations.JsonWebToken;
 import org.keycloak.services.ErrorResponseException;
 
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response;
 import java.io.IOException;
 
 /**
@@ -90,7 +91,7 @@ public class GitLabIdentityProvider extends OIDCIdentityProvider  implements Soc
 
 
 	@Override
-	protected BrokeredIdentityContext exchangeExternalImpl(EventBuilder event, MultivaluedMap<String, String> params) {
+	protected BrokeredIdentityContext exchangeExternalTokenV1Impl(EventBuilder event, MultivaluedMap<String, String> params) {
 		return exchangeExternalUserInfoValidationOnly(event, params);
 	}
 
@@ -107,7 +108,7 @@ public class GitLabIdentityProvider extends OIDCIdentityProvider  implements Soc
 
 	private BrokeredIdentityContext gitlabExtractFromProfile(JsonNode profile) {
 		String id = getJsonProperty(profile, "id");
-		BrokeredIdentityContext identity = new BrokeredIdentityContext(id);
+		BrokeredIdentityContext identity = new BrokeredIdentityContext(id, getConfig());
 
 		String name = getJsonProperty(profile, "name");
 		String preferredUsername = getJsonProperty(profile, "username");
@@ -134,14 +135,13 @@ public class GitLabIdentityProvider extends OIDCIdentityProvider  implements Soc
 
 
 	protected BrokeredIdentityContext extractIdentity(AccessTokenResponse tokenResponse, String accessToken, JsonWebToken idToken) throws IOException {
-
-		SimpleHttp.Response response = null;
+		SimpleHttpResponse response = null;
 		int status = 0;
 
 		for (int i = 0; i < 10; i++) {
 			try {
 				String userInfoUrl = getUserInfoUrl();
-				response = SimpleHttp.doGet(userInfoUrl, session)
+				response = SimpleHttp.create(session).doGet(userInfoUrl)
 						.header("Authorization", "Bearer " + accessToken).asResponse();
 				status = response.getStatus();
 			} catch (IOException e) {

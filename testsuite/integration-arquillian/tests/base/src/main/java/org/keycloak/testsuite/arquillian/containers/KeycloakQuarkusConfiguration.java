@@ -1,17 +1,12 @@
 package org.keycloak.testsuite.arquillian.containers;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import org.jboss.arquillian.container.spi.ConfigurationException;
 import org.jboss.arquillian.container.spi.client.container.ContainerConfiguration;
 import org.jboss.logging.Logger;
 import org.keycloak.common.crypto.FipsMode;
-import org.keycloak.util.JsonSerialization;
 
-import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * @author mhajas
@@ -24,32 +19,31 @@ public class KeycloakQuarkusConfiguration implements ContainerConfiguration {
     private int bindHttpPort = 8080;
     private int bindHttpsPortOffset = 0;
     private int bindHttpsPort = Integer.getInteger("auth.server.https.port", 8543);
+    private int managementPort = 9000;
 
     private String keystoreFile = System.getProperty("auth.server.keystore");
 
     private String keystorePassword = System.getProperty("auth.server.keystore.password");
-
-    private String keystoreType = System.getProperty("auth.server.keystore.type");
 
 
     private String truststoreFile = System.getProperty("auth.server.truststore");
 
     private String truststorePassword = System.getProperty("auth.server.truststore.password");
 
-    private String truststoreType = System.getProperty("auth.server.truststore.type");
-
     private int debugPort = -1;
     private Path providersPath = Paths.get(System.getProperty("auth.server.home"));
     private int startupTimeoutInSeconds = 300;
     private String route;
     private String keycloakConfigPropertyOverrides;
-    private HashMap<String, Object> keycloakConfigPropertyOverridesMap;
     private String profile;
     private String javaOpts;
     private boolean reaugmentBeforeStart;
     private String importFile = System.getProperty("migration.import.file.name");
 
-    private FipsMode fipsMode = FipsMode.valueOf(System.getProperty("auth.server.fips.mode"));
+    private FipsMode fipsMode = FipsMode.valueOfOption(System.getProperty("auth.server.fips.mode"));
+
+    private String enabledFeatures;
+    private String disabledFeatures;
 
     @Override
     public void validate() throws ConfigurationException {
@@ -61,16 +55,7 @@ public class KeycloakQuarkusConfiguration implements ContainerConfiguration {
         int newHttpsPort = baseHttpsPort + bindHttpsPortOffset;
         setBindHttpsPort(newHttpsPort);
 
-        log.info("Keycloak will listen for http on port: " + newPort + " and for https on port: " + newHttpsPort);
-
-        if (this.keycloakConfigPropertyOverrides != null) {
-            try {
-                TypeReference<HashMap<String,Object>> typeRef = new TypeReference<HashMap<String,Object>>() {};
-                this.keycloakConfigPropertyOverridesMap = JsonSerialization.sysPropertiesAwareMapper.readValue(this.keycloakConfigPropertyOverrides, typeRef);
-            } catch (IOException ex) {
-                throw new ConfigurationException(ex);
-            }
-        }
+        log.infof("Keycloak will listen for http on port: %d, for https on port: %d, and for management on port: %d\n", newPort, newHttpsPort, managementPort);
     }
 
     public int getBindHttpPortOffset() {
@@ -105,6 +90,14 @@ public class KeycloakQuarkusConfiguration implements ContainerConfiguration {
         this.bindHttpPort = bindHttpPort;
     }
 
+    public int getManagementPort() {
+        return managementPort;
+    }
+
+    public void setManagementPort(int managementPort) {
+        this.managementPort = managementPort;
+    }
+
     public String getKeystoreFile() {
         return keystoreFile;
     }
@@ -119,14 +112,6 @@ public class KeycloakQuarkusConfiguration implements ContainerConfiguration {
 
     public void setKeystorePassword(String keystorePassword) {
         this.keystorePassword = keystorePassword;
-    }
-
-    public String getKeystoreType() {
-        return keystoreType;
-    }
-
-    public void setKeystoreType(String keystoreType) {
-        this.keystoreType = keystoreType;
     }
 
     public String getTruststoreFile() {
@@ -145,20 +130,17 @@ public class KeycloakQuarkusConfiguration implements ContainerConfiguration {
         this.truststorePassword = truststorePassword;
     }
 
-    public String getTruststoreType() {
-        return truststoreType;
-    }
-
-    public void setTruststoreType(String truststoreType) {
-        this.truststoreType = truststoreType;
-    }
-
     public Path getProvidersPath() {
         return providersPath;
     }
 
     public void setProvidersPath(Path providersPath) {
         this.providersPath = providersPath;
+    }
+
+    // https://github.com/keycloak/keycloak/issues/20455 Overloading fails time to time with a mismatch error, most probably an Arquillian class reflection bug.
+    public void setProvidersPathString(String providersPath) {
+        this.providersPath = Paths.get(providersPath);
     }
 
     public int getStartupTimeoutInSeconds() {
@@ -183,18 +165,6 @@ public class KeycloakQuarkusConfiguration implements ContainerConfiguration {
 
     public void setProfile(String profile) {
         this.profile = profile;
-    }
-
-    public String getKeycloakConfigPropertyOverrides() {
-        return keycloakConfigPropertyOverrides;
-    }
-
-    public void setKeycloakConfigPropertyOverrides(String keycloakConfigPropertyOverrides) {
-        this.keycloakConfigPropertyOverrides = keycloakConfigPropertyOverrides;
-    }
-
-    public Map<String, Object> getKeycloakConfigPropertyOverridesMap() {
-        return keycloakConfigPropertyOverridesMap;
     }
 
     public void setJavaOpts(String javaOpts) {
@@ -243,5 +213,21 @@ public class KeycloakQuarkusConfiguration implements ContainerConfiguration {
 
     public void setFipsMode(FipsMode fipsMode) {
         this.fipsMode = fipsMode;
+    }
+
+    public void setEnabledFeatures(String enabledFeatures) {
+        this.enabledFeatures = enabledFeatures;
+    }
+
+    public String getEnabledFeatures() {
+        return enabledFeatures;
+    }
+
+    public String getDisabledFeatures() {
+        return disabledFeatures;
+    }
+
+    public void setDisabledFeatures(String disabledFeatures) {
+        this.disabledFeatures = disabledFeatures;
     }
 }

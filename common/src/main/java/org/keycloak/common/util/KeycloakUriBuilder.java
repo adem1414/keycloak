@@ -37,6 +37,8 @@ public class KeycloakUriBuilder {
     private String scheme;
     private int port = -1;
 
+    private boolean preserveDefaultPort = false;
+
     private String userInfo;
     private String path;
     private String query;
@@ -49,7 +51,12 @@ public class KeycloakUriBuilder {
     }
 
     public static KeycloakUriBuilder fromUri(String uriTemplate) {
-        return new KeycloakUriBuilder().uri(uriTemplate);
+        // default fromUri manages template params {}
+        return new KeycloakUriBuilder().uri(uriTemplate, true);
+    }
+
+    public static KeycloakUriBuilder fromUri(String uri, boolean template) {
+        return new KeycloakUriBuilder().uri(uri, template);
     }
 
     public static KeycloakUriBuilder fromPath(String path) throws IllegalArgumentException {
@@ -73,7 +80,6 @@ public class KeycloakUriBuilder {
     }
 
     private static final Pattern opaqueUri = Pattern.compile("^([^:/?#]+):([^/].*)");
-    private static final Pattern hierarchicalUri = Pattern.compile("^(([^:/?#]+):)?(//([^/?#]*))?([^?#]*)(\\?([^#]*))?(#(.*))?");
     private static final Pattern hostPortPattern = Pattern.compile("([^/:]+):(\\d+)");
 
     public static boolean compare(String s1, String s2) {
@@ -129,8 +135,81 @@ public class KeycloakUriBuilder {
      * @return
      */
     public KeycloakUriBuilder uriTemplate(String uriTemplate) {
-        if (uriTemplate == null) throw new IllegalArgumentException("uriTemplate parameter is null");
-        Matcher opaque = opaqueUri.matcher(uriTemplate);
+        return uri(uriTemplate, true);
+    }
+
+    private String matchesHierarchicalUriPart(Map<String, String> map, String s, String regex, String part) {
+        if (!s.isEmpty()) {
+            Matcher m = Pattern.compile(regex).matcher(s);
+            if (m.find()) {
+                map.put(part, m.group(1));
+                return s.substring(m.end());
+            }
+        }
+        return s;
+    }
+
+    private Map<String,String> matchesHierarchicalUri(final String uri) {
+        // hierarchicalUri regex: ^(([^:/?#]+):)?(//([^/?#]*))?([^?#]*)(\\?([^#]*))?(#(.*))?
+        Map<String,String> result = new HashMap<>();
+        // scheme
+        String s = matchesHierarchicalUriPart(result, uri, "^([^:/?#]+):", "scheme");
+        // authority
+        s = matchesHierarchicalUriPart(result, s, "^//([^/?#]*)", "authority");
+        // path
+        s = matchesHierarchicalUriPart(result, s, "^([^?#]*)", "path");
+        // query
+        s = matchesHierarchicalUriPart(result, s, "^\\?([^#]*)", "query");
+        // fragment
+        s = matchesHierarchicalUriPart(result, s, "^#(.*)", "fragment");
+        // if the uri is parsed completely it is a valid uri
+        return s.isEmpty() ? result : null;
+    }
+
+    protected KeycloakUriBuilder parseHierarchicalUri(String uri, Map<String,String> match, boolean template) {
+        boolean scheme = match.get("scheme") != null;
+        if (scheme) this.scheme = match.get("scheme");
+        String authority = match.get("authority");
+        if (authority != null) {
+            this.authority = null;
+            String host = authority;
+            int at = host.indexOf('@');
+            if (at > -1) {
+                String user = host.substring(0, at);
+                host = host.substring(at + 1);
+                replaceUserInfo(user, template);
+            }
+            Matcher hostPortMatch = hostPortPattern.matcher(host);
+            if (hostPortMatch.matches()) {
+                this.host = hostPortMatch.group(1);
+                try {
+                    this.port = Integer.parseInt(hostPortMatch.group(2));
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException("Illegal uri template: " + uri, e);
+                }
+            } else {
+                this.host = host;
+            }
+        }
+        if (match.get("path") != null) {
+            String group = match.get("path");
+            if (!scheme && !"".equals(group) && !group.startsWith("/") && group.indexOf(':') > -1)
+                throw new IllegalArgumentException("Illegal uri template: " + uri);
+            if (!"".equals(group)) replacePath(group, template);
+        }
+        if (match.get("query") != null) replaceQuery(match.get("query"), template);
+        if (match.get("fragment") != null) fragment(match.get("fragment"), template);
+        return this;
+    }
+
+    public KeycloakUriBuilder uri(String uri) throws IllegalArgumentException {
+        // default uri manages template params {}
+        return uri(uri, true);
+    }
+
+    public KeycloakUriBuilder uri(String uri, boolean template) throws IllegalArgumentException {
+        if (uri == null) throw new IllegalArgumentException("uri parameter is null");
+        Matcher opaque = opaqueUri.matcher(uri);
         if (opaque.matches()) {
             this.authority = null;
             this.host = null;
@@ -141,53 +220,13 @@ public class KeycloakUriBuilder {
             this.ssp = opaque.group(2);
             return this;
         } else {
-            Matcher match = hierarchicalUri.matcher(uriTemplate);
-            if (match.matches()) {
+            Map<String,String> match = matchesHierarchicalUri(uri);
+            if (match != null) {
                 ssp = null;
-                return parseHierarchicalUri(uriTemplate, match);
+                return parseHierarchicalUri(uri, match, template);
             }
         }
-        throw new IllegalArgumentException("Illegal uri template: " + uriTemplate);
-    }
-
-    protected KeycloakUriBuilder parseHierarchicalUri(String uriTemplate, Matcher match) {
-        boolean scheme = match.group(2) != null;
-        if (scheme) this.scheme = match.group(2);
-        String authority = match.group(4);
-        if (authority != null) {
-            this.authority = null;
-            String host = match.group(4);
-            int at = host.indexOf('@');
-            if (at > -1) {
-                String user = host.substring(0, at);
-                host = host.substring(at + 1);
-                this.userInfo = user;
-            }
-            Matcher hostPortMatch = hostPortPattern.matcher(host);
-            if (hostPortMatch.matches()) {
-                this.host = hostPortMatch.group(1);
-                try {
-                    this.port = Integer.parseInt(hostPortMatch.group(2));
-                } catch (NumberFormatException e) {
-                    throw new IllegalArgumentException("Illegal uri template: " + uriTemplate, e);
-                }
-            } else {
-                this.host = host;
-            }
-        }
-        if (match.group(5) != null) {
-            String group = match.group(5);
-            if (!scheme && !"".equals(group) && !group.startsWith("/") && group.indexOf(':') > -1)
-                throw new IllegalArgumentException("Illegal uri template: " + uriTemplate);
-            if (!"".equals(group)) replacePath(group);
-        }
-        if (match.group(7) != null) replaceQuery(match.group(7));
-        if (match.group(9) != null) fragment(match.group(9));
-        return this;
-    }
-
-    public KeycloakUriBuilder uri(String uriTemplate) throws IllegalArgumentException {
-        return uriTemplate(uriTemplate);
+        throw new IllegalArgumentException("Illegal uri template: " + uri);
     }
 
     public KeycloakUriBuilder uri(URI uri) throws IllegalArgumentException {
@@ -290,6 +329,19 @@ public class KeycloakUriBuilder {
         return this;
     }
 
+    /**
+     * When this is called, then the port will be preserved in the build URL even if it is default port for the protocol (http, https)
+     *
+     * For example:
+     * - KeycloakUriBuilder.fromUri("https://localhost:443/path").buildAsString() will return "https://localhost/path" (port not preserved)
+     * - KeycloakUriBuilder.fromUri("https://localhost:443/path").preserveDefaultPort().buildAsString() will return "https://localhost:443/path" (port is preserved even if default port)
+     * - KeycloakUriBuilder.fromUri("https://localhost/path").preserveDefaultPort().buildAsString() will return "https://localhost/path" (port not included even if "preserveDefaultPort" as it was not in the original URL)
+     */
+    public KeycloakUriBuilder preserveDefaultPort() {
+        this.preserveDefaultPort = true;
+        return this;
+    }
+
     protected static String paths(boolean encode, String basePath, String... segments) {
         String path = basePath;
         if (path == null) path = "";
@@ -341,20 +393,30 @@ public class KeycloakUriBuilder {
     }
 
     public KeycloakUriBuilder replaceQuery(String query) throws IllegalArgumentException {
+        // default replaceQuery manages template params {}
+        return replaceQuery(query, true);
+    }
+
+    public KeycloakUriBuilder replaceQuery(String query, boolean template) throws IllegalArgumentException {
         if (query == null || query.length() == 0) {
             this.query = null;
             return this;
         }
-        this.query = Encode.encodeQueryString(query);
+        this.query = template? Encode.encodeQueryString(query) : Encode.encodeQueryStringNotTemplateParameters(query);
         return this;
     }
 
     public KeycloakUriBuilder fragment(String fragment) throws IllegalArgumentException {
+        // default fragment manages template params {}
+        return fragment(fragment, true);
+    }
+
+    public KeycloakUriBuilder fragment(String fragment, boolean template) throws IllegalArgumentException {
         if (fragment == null) {
             this.fragment = null;
             return this;
         }
-        this.fragment = Encode.encodeFragment(fragment);
+        this.fragment = template? Encode.encodeFragment(fragment) : Encode.encodeFragmentNotTemplateParameters(fragment);
         return this;
     }
 
@@ -423,13 +485,15 @@ public class KeycloakUriBuilder {
             buffer.append(ssp);
         } else if (userInfo != null || host != null || port != -1) {
             buffer.append("//");
-            if (userInfo != null)
-                replaceParameter(paramMap, fromEncodedMap, isTemplate, userInfo, buffer, encodeSlash).append("@");
+            if (userInfo != null) {
+                if (host == null || host.isEmpty()) throw new RuntimeException("empty host name, but userInfo supplied");
+                replaceUserInfoParameter(paramMap, fromEncodedMap, isTemplate, userInfo, buffer).append("@");
+            }
             if (host != null) {
-                if ("".equals(host)) throw new RuntimeException("empty host name");
                 replaceParameter(paramMap, fromEncodedMap, isTemplate, host, buffer, encodeSlash);
             }
-            if (port != -1 && !(("http".equals(scheme) && port == 80) || ("https".equals(scheme) && port == 443))) {
+            if (port != -1 && (preserveDefaultPort || !(("http".equals(scheme) && port == 80) || ("https".equals(scheme) && port == 443)))) {
+                if (host == null || host.isEmpty()) throw new RuntimeException("empty host name, but port supplied");
                 buffer.append(":").append(Integer.toString(port));
             }
         } else if (authority != null) {
@@ -526,6 +590,33 @@ public class KeycloakUriBuilder {
                     value = Encode.encodeQueryParamAsIs(value);
                 } else {
                     value = Encode.encodeQueryParamSaveEncodings(value);
+                }
+                matcher.appendReplacement(buffer, value);
+            } else {
+                throw new IllegalArgumentException("path param " + param + " has not been provided by the parameter map");
+            }
+        }
+        matcher.appendTail(buffer);
+        return buffer;
+    }
+
+    protected StringBuffer replaceUserInfoParameter(Map<String, ?> paramMap, boolean fromEncodedMap, boolean isTemplate, String string, StringBuffer buffer) {
+        Matcher matcher = createUriParamMatcher(string);
+        while (matcher.find()) {
+            String param = matcher.group(1);
+            Object valObj = paramMap.get(param);
+            if (valObj == null && !isTemplate) {
+                throw new IllegalArgumentException("NULL value for template parameter: " + param);
+            } else if (valObj == null && isTemplate) {
+                matcher.appendReplacement(buffer, matcher.group());
+                continue;
+            }
+            String value = valObj.toString();
+            if (value != null) {
+                if (!fromEncodedMap) {
+                    value = Encode.encodeUserInfoAsIs(value);
+                } else {
+                    value = Encode.encodeUserInfoSaveEncodings(value);
                 }
                 matcher.appendReplacement(buffer, value);
             } else {
@@ -694,11 +785,25 @@ public class KeycloakUriBuilder {
     }
 
     public KeycloakUriBuilder replacePath(String path) {
+        // default replacePath manages template expression {}
+        return replacePath(path, true);
+    }
+
+    public KeycloakUriBuilder replacePath(String path, boolean template) {
         if (path == null) {
             this.path = null;
             return this;
         }
-        this.path = Encode.encodePath(path);
+        this.path = template? Encode.encodePath(path) : Encode.encodePathSaveEncodings(path);
+        return this;
+    }
+
+    public KeycloakUriBuilder replaceUserInfo(String userInfo, boolean template) {
+        if (userInfo == null) {
+            this.userInfo = null;
+            return this;
+        }
+        this.userInfo = template? Encode.encodeUserInfo(userInfo) : Encode.encodeUserInfoNotTemplateParameters(userInfo);
         return this;
     }
 

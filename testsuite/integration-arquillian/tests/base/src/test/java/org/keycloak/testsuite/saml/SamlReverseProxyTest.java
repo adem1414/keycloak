@@ -33,13 +33,14 @@ import org.keycloak.testsuite.util.ReverseProxy;
 import org.keycloak.testsuite.util.SamlClient;
 import org.w3c.dom.Document;
 
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriBuilder;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 
 import static org.hamcrest.Matchers.containsString;
-import static org.junit.Assert.assertThat;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.keycloak.testsuite.util.Matchers.statusCodeIsHC;
 
 /**
@@ -135,7 +136,7 @@ public class SamlReverseProxyTest extends AbstractSamlTest {
                 setRedirectStrategy(new SamlClient.RedirectStrategyWithSwitchableFollowRedirect()).build();
              CloseableHttpResponse response = client.execute(post)) {
             assertThat(response, statusCodeIsHC(expectedHttpCode));
-            assertThat(EntityUtils.toString(response.getEntity(), "UTF-8"), pageTextMatcher);
+            assertThat(EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8), pageTextMatcher);
         }
     }
 

@@ -17,14 +17,20 @@
 package org.keycloak.testsuite.actions;
 
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 
+import java.util.Arrays;
+import org.jboss.arquillian.drone.api.annotation.Drone;
 import org.jboss.arquillian.graphene.page.Page;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.keycloak.admin.client.resource.RealmResource;
+import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.common.Profile;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.UserModel.RequiredAction;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.testsuite.AbstractTestRealmKeycloakTest;
@@ -33,8 +39,12 @@ import org.keycloak.testsuite.admin.ApiUtil;
 import org.keycloak.testsuite.arquillian.annotation.EnableFeature;
 import org.keycloak.testsuite.auth.page.login.UpdateEmailPage;
 import org.keycloak.testsuite.pages.AppPage;
+import org.keycloak.testsuite.pages.ErrorPage;
 import org.keycloak.testsuite.pages.LoginPage;
+import org.keycloak.testsuite.pages.LoginUpdateProfilePage;
+import org.keycloak.testsuite.util.SecondBrowser;
 import org.keycloak.testsuite.util.UserBuilder;
+import org.openqa.selenium.WebDriver;
 
 @EnableFeature(Profile.Feature.UPDATE_EMAIL)
 public abstract class AbstractRequiredActionUpdateEmailTest extends AbstractTestRealmKeycloakTest {
@@ -48,11 +58,22 @@ public abstract class AbstractRequiredActionUpdateEmailTest extends AbstractTest
 	@Page
 	protected UpdateEmailPage updateEmailPage;
 
-	@Page
+    @Page
+    protected LoginUpdateProfilePage updateProfilePage;
+
+    @Page
 	protected AppPage appPage;
+
+    @Page
+    protected ErrorPage errorPage;
+
+    @Drone
+    @SecondBrowser
+    protected WebDriver driver2;
 
 	@Before
 	public void beforeTest() {
+        ApiUtil.enableRequiredAction(testRealm(), RequiredAction.UPDATE_EMAIL, true);
 		ApiUtil.removeUserByUsername(testRealm(), "test-user@localhost");
 		UserRepresentation user = UserBuilder.create().enabled(true)
 				.username("test-user@localhost")
@@ -74,7 +95,20 @@ public abstract class AbstractRequiredActionUpdateEmailTest extends AbstractTest
 		ApiUtil.createUserAndResetPasswordWithAdminClient(testRealm(), user, "password");
 	}
 
-	protected void prepareUser(UserRepresentation user){
+	private void setRegistrationEmailAsUsername(RealmResource realmResource, boolean enabled) {
+		RealmRepresentation realmRepresentation = realmResource.toRepresentation();
+		realmRepresentation.setRegistrationEmailAsUsername(enabled);
+		realmResource.update(realmRepresentation);
+	}
+
+        protected void configureRequiredActionsToUser(String username, String... actions) {
+                UserResource userResource = ApiUtil.findUserByUsernameId(testRealm(), username);
+                UserRepresentation userRepresentation = userResource.toRepresentation();
+                userRepresentation.setRequiredActions(Arrays.asList(actions));
+                userResource.update(userRepresentation);
+        }
+
+	protected void prepareUser(UserRepresentation user) {
 
 	}
 
@@ -84,7 +118,7 @@ public abstract class AbstractRequiredActionUpdateEmailTest extends AbstractTest
 	}
 
 	@Test
-	public void cancelIsNotDisplayed(){
+	public void cancelIsNotDisplayed() {
 		loginPage.open();
 
 		loginPage.login("test-user@localhost", "password");
@@ -108,7 +142,7 @@ public abstract class AbstractRequiredActionUpdateEmailTest extends AbstractTest
 		// assert that form holds submitted values during validation error
 		Assert.assertEquals("", updateEmailPage.getEmail());
 
-		Assert.assertEquals("Please specify email.", updateEmailPage.getEmailInputError());
+		Assert.assertTrue(updateEmailPage.getEmailInputError().contains("Please specify email."));
 
 		events.assertEmpty();
 	}
@@ -152,4 +186,31 @@ public abstract class AbstractRequiredActionUpdateEmailTest extends AbstractTest
 
 		events.assertEmpty();
 	}
+
+	@Test
+	public void updateEmailWithEmailAsUsernameEnabled() throws Exception {
+		Boolean genuineRegistrationEmailAsUsername = testRealm()
+				.toRepresentation()
+				.isRegistrationEmailAsUsername();
+
+		setRegistrationEmailAsUsername(testRealm(), true);
+		try {
+			UserRepresentation user = ActionUtil.findUserWithAdminClient(adminClient, "test-user@localhost");
+			String firstName = user.getFirstName();
+			String lastName = user.getLastName();
+			assertNotNull(firstName);
+			assertNotNull(lastName);
+			changeEmailUsingRequiredAction("new@localhost", true, true);
+			user = ActionUtil.findUserWithAdminClient(adminClient, "new@localhost");
+			Assert.assertNotNull(user);
+			firstName = user.getFirstName();
+			lastName = user.getLastName();
+			assertNotNull(firstName);
+			assertNotNull(lastName);
+		} finally {
+			setRegistrationEmailAsUsername(testRealm(), genuineRegistrationEmailAsUsername);
+		}
+	}
+
+	protected abstract void changeEmailUsingRequiredAction(String newEmail, boolean logoutOtherSessions, boolean newEmailAsUsername) throws Exception;
 }

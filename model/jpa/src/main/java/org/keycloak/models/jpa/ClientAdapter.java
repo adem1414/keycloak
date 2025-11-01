@@ -21,6 +21,7 @@ import org.keycloak.models.ClientModel;
 import org.keycloak.models.ClientScopeModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ModelDuplicateException;
+import org.keycloak.models.ModelException;
 import org.keycloak.models.ProtocolMapperModel;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RoleModel;
@@ -30,13 +31,14 @@ import org.keycloak.models.jpa.entities.ProtocolMapperEntity;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.models.utils.RoleUtils;
 
-import javax.persistence.EntityManager;
+import jakarta.persistence.EntityManager;
 
 import java.security.MessageDigest;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -447,6 +449,9 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
     @Override
     public void updateProtocolMapper(ProtocolMapperModel mapping) {
         ProtocolMapperEntity entity = getProtocolMapperEntity(mapping.getId());
+        if (entity == null) {
+            throw new ModelException("mapping with id " + mapping.getId() + " does not exist");
+        }
         entity.setProtocolMapper(mapping.getProtocolMapper());
         if (entity.getConfig() == null) {
             entity.setConfig(mapping.getConfig());
@@ -463,6 +468,14 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
         ProtocolMapperEntity entity = getProtocolMapperEntity(id);
         if (entity == null) return null;
         return entityToModel(entity);
+    }
+
+    @Override
+    public List<ProtocolMapperModel> getProtocolMapperByType(String type) {
+        return this.entity.getProtocolMappers().stream()
+                .filter((mapper) -> mapper.getProtocolMapper().equals(type))
+                .map(this::entityToModel)
+                .toList();
     }
 
     @Override
@@ -653,38 +666,6 @@ public class ClientAdapter implements ClientModel, JpaModel<ClientEntity> {
             return true;
 
         return RoleUtils.hasRole(getRolesStream(), role);
-    }
-
-    @Override
-    @Deprecated
-    public Stream<String> getDefaultRolesStream() {
-        return realm.getDefaultRole().getCompositesStream().filter(this::isClientRole).map(RoleModel::getName);
-    }
-
-    private boolean isClientRole(RoleModel role) {
-        return role.isClientRole() && Objects.equals(role.getContainerId(), this.getId());
-    }
-
-    @Override
-    @Deprecated
-    public void addDefaultRole(String name) {
-        realm.getDefaultRole().addCompositeRole(getOrAddRoleId(name));
-    }
-
-    private RoleModel getOrAddRoleId(String name) {
-        RoleModel role = getRole(name);
-        if (role == null) {
-            role = addRole(name);
-        }
-        return role;
-    }
-
-    @Override
-    @Deprecated
-    public void removeDefaultRoles(String... defaultRoles) {
-        for (String defaultRole : defaultRoles) {
-            realm.getDefaultRole().removeCompositeRole(getRole(defaultRole));
-        }
     }
 
     @Override

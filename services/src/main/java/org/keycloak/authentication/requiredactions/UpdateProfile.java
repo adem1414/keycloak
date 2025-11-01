@@ -17,6 +17,9 @@
 
 package org.keycloak.authentication.requiredactions;
 
+import static java.util.Optional.ofNullable;
+
+import jakarta.ws.rs.core.MultivaluedHashMap;
 import org.keycloak.Config;
 import org.keycloak.authentication.InitiatedActionSupport;
 import org.keycloak.authentication.RequiredActionContext;
@@ -28,6 +31,7 @@ import org.keycloak.events.EventType;
 import org.keycloak.forms.login.LoginFormsProvider;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
+import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.utils.FormMessage;
 import org.keycloak.services.validation.Validation;
@@ -37,8 +41,9 @@ import org.keycloak.userprofile.UserProfile;
 import org.keycloak.userprofile.UserProfileProvider;
 import org.keycloak.userprofile.EventAuditingAttributeChangeListener;
 
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response;
+
 import java.util.List;
 
 /**
@@ -50,7 +55,7 @@ public class UpdateProfile implements RequiredActionProvider, RequiredActionFact
     public InitiatedActionSupport initiatedActionSupport() {
         return InitiatedActionSupport.SUPPORTED;
     }
-    
+
     @Override
     public void evaluateTriggers(RequiredActionContext context) {
     }
@@ -64,14 +69,21 @@ public class UpdateProfile implements RequiredActionProvider, RequiredActionFact
     public void processAction(RequiredActionContext context) {
         EventBuilder event = context.getEvent();
         event.event(EventType.UPDATE_PROFILE).detail(Details.CONTEXT, UserProfileContext.UPDATE_PROFILE.name());
-        MultivaluedMap<String, String> formData = context.getHttpRequest().getDecodedFormParameters();
+        MultivaluedMap<String, String> formData = new MultivaluedHashMap<>(context.getHttpRequest().getDecodedFormParameters());
         UserModel user = context.getUser();
-
-        UserProfileProvider provider = context.getSession().getProvider(UserProfileProvider.class);
-        UserProfile profile = provider.create(UserProfileContext.UPDATE_PROFILE, formData, user);
+        String newEmail = formData.getFirst(UserModel.EMAIL);
+        boolean isEmailUpdated = newEmail != null && !ofNullable(user.getEmail()).orElse("").equals(newEmail);
+        RealmModel realm = context.getRealm();
+        boolean isForceEmailVerification = isEmailUpdated && UpdateEmail.isVerifyEmailEnabled(realm);
 
         try {
-            // backward compatibility with old account console where attributes are not removed if missing
+            UserProfileProvider provider = context.getSession().getProvider(UserProfileProvider.class);
+            UserProfile profile = provider.create(UserProfileContext.UPDATE_PROFILE, formData, user);
+
+            if (isForceEmailVerification) {
+                user.addRequiredAction(UserModel.RequiredAction.UPDATE_EMAIL);
+            }
+
             profile.update(false, new EventAuditingAttributeChangeListener(profile, event));
 
             context.success();
@@ -81,21 +93,23 @@ public class UpdateProfile implements RequiredActionProvider, RequiredActionFact
             context.challenge(createResponse(context, formData, errors));
         }
     }
-    
+
     protected UserModel.RequiredAction getResponseAction(){
         return UserModel.RequiredAction.UPDATE_PROFILE;
     }
-    
+
     protected Response createResponse(RequiredActionContext context, MultivaluedMap<String, String> formData, List<FormMessage> errors) {
         LoginFormsProvider form = context.form();
 
         if (errors != null && !errors.isEmpty()) {
             form.setErrors(errors);
         }
-        
+
         if(formData != null) {
             form = form.setFormData(formData);
         }
+
+        form.setUser(context.getUser());
 
         return form.createResponse(getResponseAction());
     }

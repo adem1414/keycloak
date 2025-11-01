@@ -17,21 +17,7 @@
 
 package org.keycloak.testsuite.model.singleUseObject;
 
-import org.hamcrest.Matchers;
-import org.junit.Assert;
-import org.junit.Test;
-import org.keycloak.models.DefaultActionTokenKey;
-import org.keycloak.common.util.Time;
-import org.keycloak.models.Constants;
-import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.RealmModel;
-import org.keycloak.models.SingleUseObjectProvider;
-import org.keycloak.models.UserModel;
-import org.keycloak.models.map.storage.chm.ConcurrentHashMapStorageProviderFactory;
-import org.keycloak.models.map.userSession.MapUserSessionProviderFactory;
-import org.keycloak.testsuite.model.KeycloakModelTest;
-import org.keycloak.testsuite.model.RequireProvider;
-
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -39,8 +25,26 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.hamcrest.Matchers;
+import org.infinispan.client.hotrod.RemoteCache;
+import org.junit.Assert;
+import org.junit.Test;
+import org.keycloak.common.util.Time;
+import org.keycloak.connections.infinispan.InfinispanConnectionProvider;
+import org.keycloak.infinispan.util.InfinispanUtils;
+import org.keycloak.models.Constants;
+import org.keycloak.models.DefaultActionTokenKey;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.SingleUseObjectProvider;
+import org.keycloak.models.UserModel;
+import org.keycloak.models.sessions.infinispan.InfinispanSingleUseObjectProviderFactory;
+import org.keycloak.models.sessions.infinispan.entities.SingleUseObjectValueEntity;
+import org.keycloak.services.scheduled.ClearExpiredRevokedTokens;
+import org.keycloak.testsuite.model.KeycloakModelTest;
+import org.keycloak.testsuite.model.RequireProvider;
+
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assume.assumeFalse;
 
 @RequireProvider(SingleUseObjectProvider.class)
 public class SingleUseObjectModelTest extends KeycloakModelTest {
@@ -51,7 +55,8 @@ public class SingleUseObjectModelTest extends KeycloakModelTest {
 
     @Override
     public void createEnvironment(KeycloakSession s) {
-        RealmModel realm = s.realms().createRealm("realm");
+        RealmModel realm = createRealm(s, "realm");
+        s.getContext().setRealm(realm);
         realm.setDefaultRole(s.roles().addRealmRole(realm, Constants.DEFAULT_ROLES_ROLE_PREFIX + "-" + realm.getName()));
         realmId = realm.getId();
         UserModel user = s.users().addUser(realm, "user");
@@ -60,14 +65,15 @@ public class SingleUseObjectModelTest extends KeycloakModelTest {
 
     @Override
     public void cleanEnvironment(KeycloakSession s) {
-        Time.setOffset(0);
+        RealmModel realm = s.realms().getRealm(realmId);
+        s.getContext().setRealm(realm);
         s.realms().removeRealm(realmId);
     }
 
     @Test
     public void testActionTokens() {
         DefaultActionTokenKey key = withRealm(realmId, (session, realm) -> {
-            SingleUseObjectProvider singleUseObjectProvider = session.getProvider(SingleUseObjectProvider.class);
+            SingleUseObjectProvider singleUseObjectProvider = session.singleUseObjects();
             int time = Time.currentTime();
             DefaultActionTokenKey actionTokenKey = new DefaultActionTokenKey(userId, UUID.randomUUID().toString(), time + 60, null);
             Map<String, String> notes = new HashMap<>();
@@ -77,7 +83,7 @@ public class SingleUseObjectModelTest extends KeycloakModelTest {
         });
 
         inComittedTransaction(session -> {
-            SingleUseObjectProvider singleUseObjectProvider = session.getProvider(SingleUseObjectProvider.class);
+            SingleUseObjectProvider singleUseObjectProvider = session.singleUseObjects();
             Map<String, String> notes = singleUseObjectProvider.get(key.serializeKey());
             Assert.assertNotNull(notes);
             Assert.assertEquals("bar", notes.get("foo"));
@@ -88,7 +94,7 @@ public class SingleUseObjectModelTest extends KeycloakModelTest {
         });
 
         inComittedTransaction(session -> {
-            SingleUseObjectProvider singleUseObjectProvider = session.getProvider(SingleUseObjectProvider.class);
+            SingleUseObjectProvider singleUseObjectProvider = session.singleUseObjects();
             Map<String, String> notes = singleUseObjectProvider.get(key.serializeKey());
             Assert.assertNull(notes);
 
@@ -98,13 +104,17 @@ public class SingleUseObjectModelTest extends KeycloakModelTest {
         });
 
         inComittedTransaction(session -> {
-            SingleUseObjectProvider singleUseObjectProvider = session.getProvider(SingleUseObjectProvider.class);
+            SingleUseObjectProvider singleUseObjectProvider = session.singleUseObjects();
             Map<String, String> notes = singleUseObjectProvider.get(key.serializeKey());
             Assert.assertNotNull(notes);
             Assert.assertEquals("bar", notes.get("foo"));
+        });
 
-            Time.setOffset(70);
+        setTimeOffset(70);
 
+        inComittedTransaction(session -> {
+            SingleUseObjectProvider singleUseObjectProvider = session.singleUseObjects();
+            Map<String, String> notes = singleUseObjectProvider.get(key.serializeKey());
             notes = singleUseObjectProvider.get(key.serializeKey());
             Assert.assertNull(notes);
         });
@@ -120,14 +130,14 @@ public class SingleUseObjectModelTest extends KeycloakModelTest {
         notes2.put("baf", "meow");
 
         inComittedTransaction(session -> {
-            SingleUseObjectProvider singleUseStore = session.getProvider(SingleUseObjectProvider.class);
+            SingleUseObjectProvider singleUseStore = session.singleUseObjects();
             Assert.assertFalse(singleUseStore.replace(key, notes2));
 
             singleUseStore.put(key,  60, notes);
         });
 
         inComittedTransaction(session -> {
-            SingleUseObjectProvider singleUseStore = session.getProvider(SingleUseObjectProvider.class);
+            SingleUseObjectProvider singleUseStore = session.singleUseObjects();
             Map<String, String> actualNotes = singleUseStore.get(key);
             Assert.assertEquals(notes, actualNotes);
 
@@ -135,7 +145,7 @@ public class SingleUseObjectModelTest extends KeycloakModelTest {
         });
 
         inComittedTransaction(session -> {
-            SingleUseObjectProvider singleUseStore = session.getProvider(SingleUseObjectProvider.class);
+            SingleUseObjectProvider singleUseStore = session.singleUseObjects();
             Map<String, String> actualNotes = singleUseStore.get(key);
             Assert.assertEquals(notes2, actualNotes);
 
@@ -145,29 +155,75 @@ public class SingleUseObjectModelTest extends KeycloakModelTest {
         });
 
         inComittedTransaction(session -> {
-            SingleUseObjectProvider singleUseStore = session.getProvider(SingleUseObjectProvider.class);
+            SingleUseObjectProvider singleUseStore = session.singleUseObjects();
             Assert.assertTrue(singleUseStore.putIfAbsent(key, 60));
         });
 
         inComittedTransaction(session -> {
-            SingleUseObjectProvider singleUseStore = session.getProvider(SingleUseObjectProvider.class);
+            SingleUseObjectProvider singleUseStore = session.singleUseObjects();
             Map<String, String> actualNotes = singleUseStore.get(key);
             assertThat(actualNotes, Matchers.anEmptyMap());
+        });
 
-            Time.setOffset(70);
+        setTimeOffset(70);
 
+        inComittedTransaction(session -> {
+            SingleUseObjectProvider singleUseStore = session.singleUseObjects();
             Assert.assertNull(singleUseStore.get(key));
         });
     }
 
     @Test
-    public void testCluster() throws InterruptedException {
-        // Skip the test if MapUserSessionProvider == CHM
-        String usProvider = CONFIG.getConfig().get("userSessions.provider");
-        String usMapStorageProvider = CONFIG.getConfig().get("userSessions.map.storage.provider");
-        assumeFalse(MapUserSessionProviderFactory.PROVIDER_ID.equals(usProvider) &&
-                (usMapStorageProvider == null || ConcurrentHashMapStorageProviderFactory.PROVIDER_ID.equals(usMapStorageProvider)));
+    public void testRevokedTokenIsPresentAfterRestartAndEventuallyExpires() {
+        String revokedKey = UUID.randomUUID() + SingleUseObjectProvider.REVOKED_KEY;
 
+        inComittedTransaction(session -> {
+            SingleUseObjectProvider singleUseStore = session.singleUseObjects();
+            singleUseStore.put(revokedKey,  60, Collections.emptyMap());
+        });
+
+        // Run again to ensure revocation can happen multiple times
+        inComittedTransaction(session -> {
+            SingleUseObjectProvider singleUseStore = session.singleUseObjects();
+            singleUseStore.put(revokedKey,  60, Collections.emptyMap());
+        });
+
+        // simulate restart
+        removeRevokedTokenFromRemoteCache(revokedKey);
+        reinitializeKeycloakSessionFactory();
+
+        inComittedTransaction(session -> {
+            SingleUseObjectProvider singleUseStore = session.singleUseObjects();
+            assertThat(singleUseStore.contains(revokedKey), Matchers.is(true));
+        });
+
+        setTimeOffset(120);
+
+        // simulate restart
+        removeRevokedTokenFromRemoteCache(revokedKey);
+        reinitializeKeycloakSessionFactory();
+
+        inComittedTransaction(session -> {
+            SingleUseObjectProvider singleUseStore = session.singleUseObjects();
+            // not loaded as it is too old
+            assertThat(singleUseStore.contains(revokedKey), Matchers.is(false));
+
+            // remove it from the database
+            new ClearExpiredRevokedTokens().run(session);
+        });
+
+        setTimeOffset(0);
+
+        inComittedTransaction(session -> {
+            SingleUseObjectProvider singleUseStore = session.singleUseObjects();
+            // not loaded as it has been removed from the database
+            assertThat(singleUseStore.contains(revokedKey), Matchers.is(false));
+        });
+
+    }
+
+    @Test
+    public void testCluster() throws InterruptedException {
         AtomicInteger index = new AtomicInteger();
         CountDownLatch afterFirstNodeLatch = new CountDownLatch(1);
         CountDownLatch afterDeleteLatch = new CountDownLatch(1);
@@ -187,7 +243,7 @@ public class SingleUseObjectModelTest extends KeycloakModelTest {
 
             if (index.incrementAndGet() == 1) {
                 actionTokenKey.set(withRealm(realmId, (session, realm) -> {
-                    SingleUseObjectProvider singleUseStore = session.getProvider(SingleUseObjectProvider.class);
+                    SingleUseObjectProvider singleUseStore = session.singleUseObjects();
                     singleUseStore.put(key, 60, notes);
 
                     int time = Time.currentTime();
@@ -203,10 +259,9 @@ public class SingleUseObjectModelTest extends KeycloakModelTest {
 
             // check if single-use object/action token is available on all nodes
             inComittedTransaction(session -> {
-                SingleUseObjectProvider singleUseStore = session.getProvider(SingleUseObjectProvider.class);
-                while (singleUseStore.get(key) == null || singleUseStore.get(actionTokenKey.get()) == null) {
-                    sleep(1000);
-                }
+                SingleUseObjectProvider singleUseStore = session.singleUseObjects();
+                eventually(() -> "key not found: " + key, () -> singleUseStore.get(key) != null);
+                eventually(() -> "key not found: " + actionTokenKey.get(), () -> singleUseStore.get(actionTokenKey.get()) != null);
                 replicationDone.countDown();
             });
 
@@ -215,7 +270,7 @@ public class SingleUseObjectModelTest extends KeycloakModelTest {
             // remove objects on one node
             if (index.incrementAndGet() == 5) {
                 inComittedTransaction(session -> {
-                    SingleUseObjectProvider singleUseStore = session.getProvider(SingleUseObjectProvider.class);
+                    SingleUseObjectProvider singleUseStore = session.singleUseObjects();
                     singleUseStore.remove(key);
                     singleUseStore.remove(actionTokenKey.get());
                 });
@@ -227,11 +282,10 @@ public class SingleUseObjectModelTest extends KeycloakModelTest {
 
             // check if single-use object/action token is removed
             inComittedTransaction(session -> {
-                SingleUseObjectProvider singleUseStore = session.getProvider(SingleUseObjectProvider.class);
+                SingleUseObjectProvider singleUseStore = session.singleUseObjects();
 
-                while (singleUseStore.get(key) != null && singleUseStore.get(actionTokenKey.get()) != null) {
-                   sleep(1000);
-                }
+                eventually(() -> "key found: " + key, () -> singleUseStore.get(key) == null);
+                eventually(() -> "key found: " + actionTokenKey.get(), () -> singleUseStore.get(actionTokenKey.get()) == null);
             });
         });
     }
@@ -243,5 +297,18 @@ public class SingleUseObjectModelTest extends KeycloakModelTest {
             Thread.currentThread().interrupt();
             throw new RuntimeException(e);
         }
+    }
+
+    private void removeRevokedTokenFromRemoteCache(String revokedKey) {
+        if (!InfinispanUtils.isRemoteInfinispan()) {
+            return;
+        }
+        inComittedTransaction(session -> {
+            RemoteCache<String, SingleUseObjectValueEntity> cache = session.getProvider(InfinispanConnectionProvider.class).getRemoteCache(InfinispanConnectionProvider.ACTION_TOKEN_CACHE);
+            // remove loaded key to enable preloading from database
+            cache.remove(InfinispanSingleUseObjectProviderFactory.LOADED);
+            // remote the token
+            cache.remove(revokedKey);
+        });
     }
 }

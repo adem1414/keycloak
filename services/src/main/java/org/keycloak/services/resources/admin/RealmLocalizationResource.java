@@ -19,51 +19,68 @@ package org.keycloak.services.resources.admin;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 
-import org.jboss.resteasy.plugins.providers.multipart.InputPart;
-import org.jboss.resteasy.plugins.providers.multipart.MultipartFormDataInput;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
+import org.eclipse.microprofile.openapi.annotations.extensions.Extension;
+import org.eclipse.microprofile.openapi.annotations.media.Content;
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponses;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
+import org.keycloak.http.FormPartValue;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.ModelDuplicateException;
 import org.keycloak.models.RealmModel;
-import org.keycloak.services.resources.admin.permissions.AdminPermissionEvaluator;
+import org.keycloak.services.resources.KeycloakOpenAPI;
+import org.keycloak.services.resources.admin.fgap.AdminPermissionEvaluator;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.stream.Stream;
 
-import javax.ws.rs.BadRequestException;
-import javax.ws.rs.Consumes;
-import javax.ws.rs.DELETE;
-import javax.ws.rs.GET;
-import javax.ws.rs.NotFoundException;
-import javax.ws.rs.POST;
-import javax.ws.rs.PUT;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.ForbiddenException;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.PUT;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedMap;
+import org.keycloak.services.resources.admin.fgap.AdminPermissions;
 import org.keycloak.util.JsonSerialization;
 import org.keycloak.utils.StringUtil;
 
+@Extension(name = KeycloakOpenAPI.Profiles.ADMIN, value = "")
 public class RealmLocalizationResource {
     private final RealmModel realm;
     private final AdminPermissionEvaluator auth;
 
-    @Context
-    protected KeycloakSession session;
+    protected final KeycloakSession session;
 
-    public RealmLocalizationResource(RealmModel realm, AdminPermissionEvaluator auth) {
-        this.realm = realm;
+    public RealmLocalizationResource(KeycloakSession session, AdminPermissionEvaluator auth) {
+        this.session = session;
+        this.realm = session.getContext().getRealm();
         this.auth = auth;
     }
 
     @Path("{locale}/{key}")
     @PUT
     @Consumes(MediaType.TEXT_PLAIN)
+    @Tag(name = KeycloakOpenAPI.Admin.Tags.REALMS_ADMIN)
+    @Operation()
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "400", description = "Bad Request"),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public void saveRealmLocalizationText(@PathParam("locale") String locale, @PathParam("key") String key,
             String text) {
         this.auth.realm().requireManageRealm();
@@ -83,16 +100,21 @@ public class RealmLocalizationResource {
     @POST
     @Path("{locale}")
     @Consumes(MediaType.MULTIPART_FORM_DATA)
-    public void createOrUpdateRealmLocalizationTextsFromFile(@PathParam("locale") String locale,
-            MultipartFormDataInput input) {
+    @Tag(name = KeycloakOpenAPI.Admin.Tags.REALMS_ADMIN)
+    @Operation(summary = "Import localization from uploaded JSON file")
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "400", description = "Bad Request"),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
+    public void createOrUpdateRealmLocalizationTextsFromFile(@PathParam("locale") String locale) {
         this.auth.realm().requireManageRealm();
 
-        Map<String, List<InputPart>> formDataMap = input.getFormDataMap();
+        MultivaluedMap<String, FormPartValue> formDataMap = session.getContext().getHttpRequest().getMultiPartFormParameters();
         if (!formDataMap.containsKey("file")) {
             throw new BadRequestException();
         }
-        InputPart file = formDataMap.get("file").get(0);
-        try (InputStream inputStream = file.getBody(InputStream.class, null)) {
+        try (InputStream inputStream = formDataMap.getFirst("file").asInputStream()) {
             TypeReference<HashMap<String, String>> typeRef = new TypeReference<HashMap<String, String>>() {
             };
             Map<String, String> rep = JsonSerialization.readValue(inputStream, typeRef);
@@ -105,6 +127,12 @@ public class RealmLocalizationResource {
     @POST
     @Path("{locale}")
     @Consumes(MediaType.APPLICATION_JSON)
+    @Tag(name = KeycloakOpenAPI.Admin.Tags.REALMS_ADMIN)
+    @Operation()
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public void createOrUpdateRealmLocalizationTexts(@PathParam("locale") String locale,
             Map<String, String> localizationTexts) {
         this.auth.realm().requireManageRealm();
@@ -113,6 +141,13 @@ public class RealmLocalizationResource {
 
     @Path("{locale}")
     @DELETE
+    @Tag(name = KeycloakOpenAPI.Admin.Tags.REALMS_ADMIN)
+    @Operation()
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "404", description = "Not Found")
+    })
     public void deleteRealmLocalizationTexts(@PathParam("locale") String locale) {
         this.auth.realm().requireManageRealm();
         if(!realm.removeRealmLocalizationTexts(locale)) {
@@ -122,6 +157,13 @@ public class RealmLocalizationResource {
 
     @Path("{locale}/{key}")
     @DELETE
+    @Tag(name = KeycloakOpenAPI.Admin.Tags.REALMS_ADMIN)
+    @Operation()
+    @APIResponses(value = {
+        @APIResponse(responseCode = "204", description = "No Content"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "404", description = "Not Found")
+    })
     public void deleteRealmLocalizationText(@PathParam("locale") String locale, @PathParam("key") String key) {
         this.auth.realm().requireManageRealm();
         if (!session.realms().deleteLocalizationText(realm, locale, key)) {
@@ -131,6 +173,12 @@ public class RealmLocalizationResource {
 
     @GET
     @Produces(MediaType.APPLICATION_JSON)
+    @Tag(name = KeycloakOpenAPI.Admin.Tags.REALMS_ADMIN)
+    @Operation()
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = String.class, type = SchemaType.ARRAY))),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
     public Stream<String> getRealmLocalizationLocales() {
         auth.requireAnyAdminRole();
 
@@ -140,23 +188,43 @@ public class RealmLocalizationResource {
     @Path("{locale}")
     @GET
     @Produces(MediaType.APPLICATION_JSON)
-    public Map<String, String> getRealmLocalizationTexts(@PathParam("locale") String locale,  @QueryParam("useRealmDefaultLocaleFallback") Boolean useFallback) {
-        auth.requireAnyAdminRole();
-
-        Map<String, String> realmLocalizationTexts = new HashMap<>();
-        if(useFallback != null && useFallback && StringUtil.isNotBlank(realm.getDefaultLocale())) {
-            realmLocalizationTexts.putAll(realm.getRealmLocalizationTextsByLocale(realm.getDefaultLocale()));
+    @Tag(name = KeycloakOpenAPI.Admin.Tags.REALMS_ADMIN)
+    @Operation()
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "OK"),
+        @APIResponse(responseCode = "403", description = "Forbidden")
+    })
+    public Map<String, String> getRealmLocalizationTexts(@PathParam("locale") String locale,
+            @Deprecated @QueryParam("useRealmDefaultLocaleFallback") Boolean useFallback) {
+        if (!AdminPermissions.realms(session, auth.adminAuth()).isAdmin()) {
+            throw new ForbiddenException();
         }
 
-        realmLocalizationTexts.putAll(realm.getRealmLocalizationTextsByLocale(locale));
+        // this fallback is no longer needed since the fix for #15845, don't forget to remove it from the API
+        if (useFallback != null && useFallback) {
+            Map<String, String> realmLocalizationTexts = new HashMap<>();
+            if (StringUtil.isNotBlank(realm.getDefaultLocale())) {
+                realmLocalizationTexts.putAll(realm.getRealmLocalizationTextsByLocale(realm.getDefaultLocale()));
+            }
 
-        return realmLocalizationTexts;
+            realmLocalizationTexts.putAll(realm.getRealmLocalizationTextsByLocale(locale));
 
+            return realmLocalizationTexts;
+        }
+
+        return realm.getRealmLocalizationTextsByLocale(locale);
     }
 
     @Path("{locale}/{key}")
     @GET
     @Produces(MediaType.TEXT_PLAIN)
+    @Tag(name = KeycloakOpenAPI.Admin.Tags.REALMS_ADMIN)
+    @Operation()
+    @APIResponses(value = {
+        @APIResponse(responseCode = "200", description = "OK"),
+        @APIResponse(responseCode = "403", description = "Forbidden"),
+        @APIResponse(responseCode = "404", description = "Not Found")
+    })
     public String getRealmLocalizationText(@PathParam("locale") String locale, @PathParam("key") String key) {
         auth.requireAnyAdminRole();
 

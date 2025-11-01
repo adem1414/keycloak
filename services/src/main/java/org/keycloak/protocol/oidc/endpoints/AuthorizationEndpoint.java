@@ -18,9 +18,9 @@
 package org.keycloak.protocol.oidc.endpoints;
 
 import org.jboss.logging.Logger;
-import org.jboss.resteasy.spi.ResteasyProviderFactory;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.authentication.AuthenticationProcessor;
+import org.keycloak.common.Profile;
 import org.keycloak.constants.AdapterConstants;
 import org.keycloak.events.Details;
 import org.keycloak.events.Errors;
@@ -30,11 +30,14 @@ import org.keycloak.locale.LocaleSelectorProvider;
 import org.keycloak.models.AuthenticationFlowModel;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.Constants;
-import org.keycloak.models.RealmModel;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.organization.utils.Organizations;
 import org.keycloak.protocol.AuthorizationEndpointBase;
+import org.keycloak.protocol.oidc.OIDCAdvancedConfigWrapper;
 import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.protocol.oidc.endpoints.request.AuthorizationEndpointRequest;
 import org.keycloak.protocol.oidc.endpoints.request.AuthorizationEndpointRequestParserProcessor;
+import org.keycloak.protocol.oidc.endpoints.request.RequestUriType;
 import org.keycloak.protocol.oidc.utils.AcrUtils;
 import org.keycloak.protocol.oidc.grants.device.endpoints.DeviceEndpoint;
 import org.keycloak.protocol.oidc.utils.OIDCRedirectUriBuilder;
@@ -44,24 +47,28 @@ import org.keycloak.services.ErrorPageException;
 import org.keycloak.services.Urls;
 import org.keycloak.services.clientpolicy.ClientPolicyException;
 import org.keycloak.services.clientpolicy.context.AuthorizationRequestContext;
+import org.keycloak.services.clientpolicy.context.PreAuthorizationRequestContext;
+import org.keycloak.services.managers.AuthenticationSessionManager;
 import org.keycloak.services.messages.Messages;
 import org.keycloak.services.resources.LoginActionsService;
 import org.keycloak.services.util.CacheControlUtil;
+import org.keycloak.services.util.LocaleUtil;
 import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.util.TokenUtil;
 
-import javax.ws.rs.Consumes;
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response;
 
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
+
+import static org.keycloak.protocol.oidc.par.endpoints.ParEndpoint.PAR_DPOP_PROOF_JKT;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -94,8 +101,8 @@ public class AuthorizationEndpoint extends AuthorizationEndpointBase {
     private AuthorizationEndpointRequest request;
     private String redirectUri;
 
-    public AuthorizationEndpoint(RealmModel realm, EventBuilder event) {
-        super(realm, event);
+    public AuthorizationEndpoint(KeycloakSession session, EventBuilder event) {
+        super(session, event);
         event.event(EventType.LOGIN);
     }
 
@@ -117,16 +124,27 @@ public class AuthorizationEndpoint extends AuthorizationEndpointBase {
      */
     @Path("device")
     public Object authorizeDevice() {
-        DeviceEndpoint endpoint = new DeviceEndpoint(realm, event);
-        ResteasyProviderFactory.getInstance().injectProperties(endpoint);
-        return endpoint;
+        if (!Profile.isFeatureEnabled(Profile.Feature.DEVICE_FLOW)) {
+            return null;
+        }
+        return new DeviceEndpoint(session, event);
     }
 
-    private Response process(MultivaluedMap<String, String> params) {
+    private Response process(final MultivaluedMap<String, String> params) {
         String clientId = AuthorizationEndpointRequestParserProcessor.getClientId(event, session, params);
 
         checkSsl();
         checkRealm();
+
+        try {
+            session.clientPolicy().triggerOnEvent(new PreAuthorizationRequestContext(clientId, params));
+        } catch (ClientPolicyException cpe) {
+            event.detail(Details.REASON, Details.CLIENT_POLICY_ERROR);
+            event.detail(Details.CLIENT_POLICY_ERROR, cpe.getError());
+            event.detail(Details.CLIENT_POLICY_ERROR_DETAIL, cpe.getErrorDetail());
+            event.error(cpe.getError());
+            throw new ErrorPageException(session, authenticationSession, cpe.getErrorStatus(), cpe.getErrorDetail());
+        }
         checkClient(clientId);
 
         request = AuthorizationEndpointRequestParserProcessor.parseRequest(event, session, client, params, AuthorizationEndpointRequestParserProcessor.EndpointType.OIDC_AUTH_ENDPOINT);
@@ -174,34 +192,65 @@ public class AuthorizationEndpoint extends AuthorizationEndpointBase {
             return redirectErrorToClient(parsedResponseMode, ex.getError(), ex.getErrorDescription());
         }
 
-        try {
-            session.clientPolicy().triggerOnEvent(new AuthorizationRequestContext(parsedResponseType, request, redirectUri, params));
-        } catch (ClientPolicyException cpe) {
-            return redirectErrorToClient(parsedResponseMode, cpe.getError(), cpe.getErrorDetail());
+        // If DPoP Proof existed with PAR request, its public key needs to be matched with the one with Token Request afterward
+        String dpopJkt = session.getAttribute(PAR_DPOP_PROOF_JKT, String.class);
+        if (dpopJkt != null) {
+            // if dpop_jkt is specified in an authorization request sent to Authorization Endpoint, it is overwritten by one in PAR request
+            request.setDpopJkt(dpopJkt);
         }
 
         authenticationSession = createAuthenticationSession(client, request.getState());
+
+        try {
+            session.clientPolicy().triggerOnEvent(new AuthorizationRequestContext(parsedResponseType, request, redirectUri, params, authenticationSession));
+        } catch (ClientPolicyException cpe) {
+            event.detail(Details.REASON, Details.CLIENT_POLICY_ERROR);
+            event.detail(Details.CLIENT_POLICY_ERROR, cpe.getError());
+            event.detail(Details.CLIENT_POLICY_ERROR_DETAIL, cpe.getErrorDetail());
+            event.error(cpe.getError());
+            new AuthenticationSessionManager(session).removeAuthenticationSession(realm, authenticationSession, false);
+            return redirectErrorToClient(parsedResponseMode, cpe.getError(), cpe.getErrorDetail());
+        }
+
         updateAuthenticationSession();
 
         // So back button doesn't work
-        CacheControlUtil.noBackButtonCacheControlHeader();
+        CacheControlUtil.noBackButtonCacheControlHeader(session);
+
+        // Add support for Initiating User Registration via OpenID Connect 1.0 via prompt=create
+        // see: https://openid.net/specs/openid-connect-prompt-create-1_0.html#section-4.1
+        if (OIDCLoginProtocol.PROMPT_VALUE_CREATE.equals(params.getFirst(OAuth2Constants.PROMPT))) {
+            if (!Organizations.isRegistrationAllowed(session, realm)) {
+                throw new ErrorPageException(session, authenticationSession, Response.Status.BAD_REQUEST, Messages.REGISTRATION_NOT_ALLOWED);
+            }
+            return buildRegister();
+        }
+
         switch (action) {
             case REGISTER:
                 return buildRegister();
             case FORGOT_CREDENTIALS:
                 return buildForgotCredential();
             case CODE:
-                return buildAuthorizationCodeAuthorizationResponse();
+                return buildAuthorizationCodeAuthorizationResponse(params.getFirst(OIDCLoginProtocol.REQUEST_URI_PARAM));
         }
 
         throw new RuntimeException("Unknown action " + action);
     }
 
-    public AuthorizationEndpoint register() {
+    public AuthorizationEndpoint register(String tokenString) {
         event.event(EventType.REGISTER);
         action = Action.REGISTER;
 
-        if (!realm.isRegistrationAllowed()) {
+        if (Profile.isFeatureEnabled(Profile.Feature.ORGANIZATION) && tokenString != null) {
+            //this call should extract orgId from token and set the organization to the session context
+            Response errorResponse = new LoginActionsService(session, event).preHandleActionToken(tokenString);
+            if (errorResponse != null) {
+                throw new ErrorPageException(errorResponse);
+            }
+        }
+
+        if (!Organizations.isRegistrationAllowed(session, realm)) {
             throw new ErrorPageException(session, authenticationSession, Response.Status.BAD_REQUEST, Messages.REGISTRATION_NOT_ALLOWED);
         }
 
@@ -221,6 +270,7 @@ public class AuthorizationEndpoint extends AuthorizationEndpointBase {
 
     private void checkClient(String clientId) {
         if (clientId == null) {
+            event.detail(Details.REASON, "Missing parameter: " + OIDCLoginProtocol.CLIENT_ID_PARAM);
             event.error(Errors.INVALID_REQUEST);
             throw new ErrorPageException(session, authenticationSession, Response.Status.BAD_REQUEST, Messages.MISSING_PARAMETER, OIDCLoginProtocol.CLIENT_ID_PARAM);
         }
@@ -230,7 +280,7 @@ public class AuthorizationEndpoint extends AuthorizationEndpointBase {
         client = realm.getClientByClientId(clientId);
         if (client == null) {
             event.error(Errors.CLIENT_NOT_FOUND);
-            throw new ErrorPageException(session, authenticationSession, Response.Status.BAD_REQUEST, Messages.INVALID_PARAMETER, OIDCLoginProtocol.REDIRECT_URI_PARAM);
+            throw new ErrorPageException(session, authenticationSession, Response.Status.BAD_REQUEST, Messages.CLIENT_NOT_FOUND);
         }
 
         if (!client.isEnabled()) {
@@ -249,14 +299,18 @@ public class AuthorizationEndpoint extends AuthorizationEndpointBase {
             protocol = OIDCLoginProtocol.LOGIN_PROTOCOL;
         }
         if (!protocol.equals(OIDCLoginProtocol.LOGIN_PROTOCOL)) {
+            String errorMessage = "Wrong client protocol.";
+            event.detail(Details.REASON, errorMessage);
             event.error(Errors.INVALID_CLIENT);
-            throw new ErrorPageException(session, authenticationSession, Response.Status.BAD_REQUEST, "Wrong client protocol.");
+            throw new ErrorPageException(session, authenticationSession, Response.Status.BAD_REQUEST, errorMessage);
         }
 
         session.getContext().setClient(client);
     }
 
     private Response redirectErrorToClient(OIDCResponseMode responseMode, String error, String errorDescription) {
+        CacheControlUtil.noBackButtonCacheControlHeader(session);
+
         OIDCRedirectUriBuilder errorResponseBuilder = OIDCRedirectUriBuilder.fromUri(redirectUri, responseMode, session, null)
                 .addParam(OAuth2Constants.ERROR, error);
 
@@ -266,6 +320,11 @@ public class AuthorizationEndpoint extends AuthorizationEndpointBase {
 
         if (request.getState() != null) {
             errorResponseBuilder.addParam(OAuth2Constants.STATE, request.getState());
+        }
+
+        OIDCAdvancedConfigWrapper clientConfig = OIDCAdvancedConfigWrapper.fromClientModel(client);
+        if (!clientConfig.isExcludeIssuerFromAuthResponse()) {
+            errorResponseBuilder.addParam(OAuth2Constants.ISSUER, Urls.realmIssuer(session.getContext().getUri().getBaseUri(), realm.getName()));
         }
 
         return errorResponseBuilder.build();
@@ -279,23 +338,9 @@ public class AuthorizationEndpoint extends AuthorizationEndpointBase {
         authenticationSession.setClientNote(OIDCLoginProtocol.REDIRECT_URI_PARAM, request.getRedirectUriParam());
         authenticationSession.setClientNote(OIDCLoginProtocol.ISSUER, Urls.realmIssuer(session.getContext().getUri().getBaseUri(), realm.getName()));
 
-        if (request.getState() != null) authenticationSession.setClientNote(OIDCLoginProtocol.STATE_PARAM, request.getState());
-        if (request.getNonce() != null) authenticationSession.setClientNote(OIDCLoginProtocol.NONCE_PARAM, request.getNonce());
+        performActionOnParameters(request, (paramName, paramValue) -> {if (paramValue != null) authenticationSession.setClientNote(paramName, paramValue);});
         if (request.getMaxAge() != null) authenticationSession.setClientNote(OIDCLoginProtocol.MAX_AGE_PARAM, String.valueOf(request.getMaxAge()));
-        if (request.getScope() != null) authenticationSession.setClientNote(OIDCLoginProtocol.SCOPE_PARAM, request.getScope());
-        if (request.getLoginHint() != null) authenticationSession.setClientNote(OIDCLoginProtocol.LOGIN_HINT_PARAM, request.getLoginHint());
-        if (request.getPrompt() != null) authenticationSession.setClientNote(OIDCLoginProtocol.PROMPT_PARAM, request.getPrompt());
-        if (request.getIdpHint() != null) authenticationSession.setClientNote(AdapterConstants.KC_IDP_HINT, request.getIdpHint());
-        if (request.getAction() != null) authenticationSession.setClientNote(Constants.KC_ACTION, request.getAction());
-        if (request.getResponseMode() != null) authenticationSession.setClientNote(OIDCLoginProtocol.RESPONSE_MODE_PARAM, request.getResponseMode());
-        if (request.getClaims()!= null) authenticationSession.setClientNote(OIDCLoginProtocol.CLAIMS_PARAM, request.getClaims());
-        if (request.getAcr() != null) authenticationSession.setClientNote(OIDCLoginProtocol.ACR_PARAM, request.getAcr());
-        if (request.getDisplay() != null) authenticationSession.setAuthNote(OAuth2Constants.DISPLAY, request.getDisplay());
-        if (request.getUiLocales() != null) authenticationSession.setAuthNote(LocaleSelectorProvider.CLIENT_REQUEST_LOCALE, request.getUiLocales());
-
-        // https://tools.ietf.org/html/rfc7636#section-4
-        if (request.getCodeChallenge() != null) authenticationSession.setClientNote(OIDCLoginProtocol.CODE_CHALLENGE_PARAM, request.getCodeChallenge());
-        if (request.getCodeChallengeMethod() != null) authenticationSession.setClientNote(OIDCLoginProtocol.CODE_CHALLENGE_METHOD_PARAM, request.getCodeChallengeMethod());
+        if (request.getUiLocales() != null) authenticationSession.setClientNote(LocaleSelectorProvider.CLIENT_REQUEST_LOCALE, request.getUiLocales());
 
         Map<String, Integer> acrLoaMap = AcrUtils.getAcrLoaMap(authenticationSession.getClient());
         List<String> acrValues = AcrUtils.getRequiredAcrValues(request.getClaims());
@@ -303,6 +348,14 @@ public class AuthorizationEndpoint extends AuthorizationEndpointBase {
         if (acrValues.isEmpty()) {
             acrValues = AcrUtils.getAcrValues(request.getClaims(), request.getAcr(), authenticationSession.getClient());
         } else {
+            List<String> minimizedAcrValues = AcrUtils.enforceMinimumAcr(acrValues, client);
+            // If enforcing a minimum here changes the list, the client has an essential claim that is too low
+            if (!minimizedAcrValues.equals(acrValues)) {
+                logger.errorf("Requested essential acr value list contains values lower than the client minimum. Please doublecheck the client configuration or correct ACR passed in the 'claims' parameter.");
+                event.detail(Details.REASON, "Invalid requested essential acr value");
+                event.error(Errors.INVALID_REQUEST);
+                throw new ErrorPageException(session, authenticationSession, Response.Status.BAD_REQUEST, Messages.INVALID_PARAMETER, OIDCLoginProtocol.CLAIMS_PARAM);
+            }
             authenticationSession.setClientNote(Constants.FORCE_LEVEL_OF_AUTHENTICATION, "true");
         }
 
@@ -315,6 +368,7 @@ public class AuthorizationEndpoint extends AuthorizationEndpointBase {
                 boolean essential = Boolean.parseBoolean(authenticationSession.getClientNote(Constants.FORCE_LEVEL_OF_AUTHENTICATION));
                 if (essential) {
                     logger.errorf("Requested essential acr value '%s' is not a number and it is not mapped in the ACR-To-Loa mappings of realm or client. Please doublecheck ACR-to-LOA mapping or correct ACR passed in the 'claims' parameter.", acr);
+                    event.detail(Details.REASON, "Invalid requested essential acr value");
                     event.error(Errors.INVALID_REQUEST);
                     throw new ErrorPageException(session, authenticationSession, Response.Status.BAD_REQUEST, Messages.INVALID_PARAMETER, OIDCLoginProtocol.CLAIMS_PARAM);
                 } else {
@@ -324,34 +378,47 @@ public class AuthorizationEndpoint extends AuthorizationEndpointBase {
             }
         }).min().ifPresent(loa -> authenticationSession.setClientNote(Constants.REQUESTED_LEVEL_OF_AUTHENTICATION, String.valueOf(loa)));
 
+
         if (request.getAdditionalReqParams() != null) {
             for (String paramName : request.getAdditionalReqParams().keySet()) {
                 authenticationSession.setClientNote(LOGIN_SESSION_NOTE_ADDITIONAL_REQ_PARAMS_PREFIX + paramName, request.getAdditionalReqParams().get(paramName));
             }
+
+            // Store authorization_details from authorization/PAR request for later processing
+            String authorizationDetails = request.getAdditionalReqParams().get(OAuth2Constants.AUTHORIZATION_DETAILS_PARAM);
+            if (authorizationDetails != null) {
+                authenticationSession.setClientNote(OAuth2Constants.AUTHORIZATION_DETAILS_PARAM, authorizationDetails);
+            }
         }
     }
 
-    private Response buildAuthorizationCodeAuthorizationResponse() {
+    private Response buildAuthorizationCodeAuthorizationResponse(String requestUriParam) {
         this.event.event(EventType.LOGIN);
         authenticationSession.setAuthNote(Details.AUTH_TYPE, CODE_AUTH_TYPE);
 
-        return handleBrowserAuthenticationRequest(authenticationSession, new OIDCLoginProtocol(session, realm, session.getContext().getUri(), headers, event), TokenUtil.hasPrompt(request.getPrompt(), OIDCLoginProtocol.PROMPT_VALUE_NONE), false);
+        // redirect if it is a PAR request because authentication can need a refresh (kerberos) and the single object is consumed now
+        final boolean redirectToAuthenticationIfParRequest = requestUriParam != null
+                && RequestUriType.PAR == AuthorizationEndpointRequestParserProcessor.getRequestUriType(requestUriParam);
+
+        return handleBrowserAuthenticationRequest(authenticationSession, new OIDCLoginProtocol(session, realm, session.getContext().getUri(), headers, event),
+                TokenUtil.hasPrompt(request.getPrompt(), OIDCLoginProtocol.PROMPT_VALUE_NONE), redirectToAuthenticationIfParRequest);
     }
 
     private Response buildRegister() {
-        authManager.expireIdentityCookie(realm, session.getContext().getUri(), clientConnection);
+        authManager.expireIdentityCookie(session);
 
         AuthenticationFlowModel flow = realm.getRegistrationFlow();
         String flowId = flow.getId();
 
         AuthenticationProcessor processor = createProcessor(authenticationSession, flowId, LoginActionsService.REGISTRATION_PATH);
         authenticationSession.setClientNote(APP_INITIATED_FLOW, LoginActionsService.REGISTRATION_PATH);
+        LocaleUtil.processLocaleParam(session, realm, authenticationSession);
 
         return processor.authenticate();
     }
 
     private Response buildForgotCredential() {
-        authManager.expireIdentityCookie(realm, session.getContext().getUri(), clientConnection);
+        authManager.expireIdentityCookie(session);
 
         AuthenticationFlowModel flow = realm.getResetCredentialsFlow();
         String flowId = flow.getId();
@@ -362,4 +429,30 @@ public class AuthorizationEndpoint extends AuthorizationEndpointBase {
         return processor.authenticate();
     }
 
+    public static void performActionOnParameters(AuthorizationEndpointRequest request, BiConsumer<String, String> paramAction) {
+        paramAction.accept(AdapterConstants.KC_IDP_HINT, request.getIdpHint());
+
+        String kcAction = request.getAction();
+        String kcActionParameter = null;
+        if (kcAction != null && kcAction.contains(":")) {
+            String[] splits = kcAction.split(":");
+            kcAction = splits[0];
+            kcActionParameter = splits[1];
+        }
+        paramAction.accept(Constants.KC_ACTION, kcAction);
+        paramAction.accept(Constants.KC_ACTION_PARAMETER, kcActionParameter);
+
+        paramAction.accept(OAuth2Constants.DISPLAY, request.getDisplay());
+        paramAction.accept(OIDCLoginProtocol.ACR_PARAM, request.getAcr());
+        paramAction.accept(OIDCLoginProtocol.CLAIMS_PARAM, request.getClaims());
+        paramAction.accept(OIDCLoginProtocol.CODE_CHALLENGE_METHOD_PARAM, request.getCodeChallengeMethod());
+        paramAction.accept(OIDCLoginProtocol.CODE_CHALLENGE_PARAM, request.getCodeChallenge());
+        paramAction.accept(OIDCLoginProtocol.LOGIN_HINT_PARAM, request.getLoginHint());
+        paramAction.accept(OIDCLoginProtocol.NONCE_PARAM, request.getNonce());
+        paramAction.accept(OIDCLoginProtocol.PROMPT_PARAM, request.getPrompt());
+        paramAction.accept(OIDCLoginProtocol.RESPONSE_MODE_PARAM, request.getResponseMode());
+        paramAction.accept(OIDCLoginProtocol.SCOPE_PARAM, request.getScope());
+        paramAction.accept(OIDCLoginProtocol.STATE_PARAM, request.getState());
+        paramAction.accept(OIDCLoginProtocol.DPOP_JKT, request.getDpopJkt());
+    }
 }

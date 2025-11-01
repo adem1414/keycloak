@@ -34,7 +34,7 @@ import java.io.IOException;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThat;
+import static org.hamcrest.MatcherAssert.assertThat;
 
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
@@ -53,7 +53,7 @@ public class AccountRestServiceCorsTest extends AbstractTestRealmKeycloakTest {
     @Before
     public void before() {
         client = HttpClientBuilder.create().build();
-        oauth.clientId("direct-grant");
+        oauth.client("direct-grant", "password");
         executor = (JavascriptExecutor) driver;
     }
 

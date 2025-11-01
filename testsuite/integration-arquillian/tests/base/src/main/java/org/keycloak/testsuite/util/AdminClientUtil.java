@@ -18,10 +18,13 @@
 package org.keycloak.testsuite.util;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.security.KeyManagementException;
+import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
+import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
 
 import javax.net.ssl.SSLContext;
@@ -56,18 +59,18 @@ public class AdminClientUtil {
 
     public static Keycloak createAdminClient(boolean ignoreUnknownProperties, String authServerContextRoot) throws Exception {
         return createAdminClient(ignoreUnknownProperties, authServerContextRoot, MASTER, ADMIN, ADMIN,
-            Constants.ADMIN_CLI_CLIENT_ID, null, null);
+            Constants.ADMIN_CLI_CLIENT_ID, null, null, false);
 
     }
 
     public static Keycloak createAdminClient(boolean ignoreUnknownProperties, String realmName, String username,
         String password, String clientId, String clientSecret) throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, KeyManagementException {
         return createAdminClient(ignoreUnknownProperties, getAuthServerContextRoot(), realmName, username, password,
-            clientId, clientSecret, null);
+            clientId, clientSecret, null, false);
     }
 
     public static Keycloak createAdminClient(boolean ignoreUnknownProperties, String authServerContextRoot, String realmName,
-        String username, String password, String clientId, String clientSecret, String scope)
+        String username, String password, String clientId, String clientSecret, String scope, boolean useDPoP)
         throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, KeyManagementException {
 
         ResteasyClient resteasyClient = createResteasyClient(ignoreUnknownProperties, null);
@@ -80,7 +83,9 @@ public class AdminClientUtil {
                 .clientId(clientId)
                 .clientSecret(clientSecret)
                 .resteasyClient(resteasyClient)
-                .scope(scope).build();
+                .scope(scope)
+                .useDPoP(useDPoP)
+                .build();
     }
 
     public static Keycloak createAdminClientWithClientCredentials(String realmName, String clientId, String clientSecret, String scope)
@@ -98,6 +103,22 @@ public class AdminClientUtil {
                 .resteasyClient(resteasyClient)
                 .scope(scope).build();
     }
+
+    public static Keycloak createMTlsAdminClientWithClientCredentialsWithoutSecret(
+        final String realmName, String clientId, String scope)
+        throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, KeyManagementException {
+
+        boolean ignoreUnknownProperties = false;
+        ResteasyClient resteasyClient = createResteasyClientWithKeystoreAndTruststore();
+
+        return KeycloakBuilder.builder()
+                .serverUrl(getAuthServerContextRoot() + "/auth")
+                .realm(realmName)
+                .grantType(OAuth2Constants.CLIENT_CREDENTIALS)
+                .clientId(clientId)
+                .resteasyClient(resteasyClient)
+                .scope(scope).build();
+  }
 
     public static Keycloak createAdminClient() throws Exception {
         return createAdminClient(false, getAuthServerContextRoot());
@@ -118,12 +139,7 @@ public class AdminClientUtil {
     public static ResteasyClient createResteasyClient(boolean ignoreUnknownProperties, Boolean followRedirects) throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, KeyManagementException {
         ResteasyClientBuilder resteasyClientBuilder = (ResteasyClientBuilder) ResteasyClientBuilder.newBuilder();
 
-        if ("true".equals(System.getProperty("auth.server.ssl.required"))) {
-            File trustore = new File(PROJECT_BUILD_DIRECTORY, "dependency/keystore/keycloak.truststore");
-            resteasyClientBuilder.sslContext(getSSLContextWithTrustore(trustore, "secret"));
-
-            System.setProperty("javax.net.ssl.trustStore", trustore.getAbsolutePath());
-        }
+        resteasyClientBuilder.sslContext(getSSLContextWithTruststore());
 
         // We need to ignore unknown JSON properties e.g. in the adapter configuration representation
         // during adapter backward compatibility testing
@@ -145,14 +161,72 @@ public class AdminClientUtil {
         return resteasyClientBuilder.build();
     }
 
-    private static SSLContext getSSLContextWithTrustore(File file, String password) throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, KeyManagementException {
+    public static ResteasyClient createResteasyClientWithKeystoreAndTruststore() throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, KeyManagementException {
+        ResteasyClientBuilder resteasyClientBuilder = (ResteasyClientBuilder) ResteasyClientBuilder.newBuilder();
+
+        if ("true".equals(System.getProperty("auth.server.ssl.required"))) {
+            File truststore = new File(PROJECT_BUILD_DIRECTORY, "dependency/keystore/keycloak.truststore");
+            try {
+                resteasyClientBuilder.sslContext(getSSLContextWithTruststoreAndKeystore(
+                  truststore, "secret",
+                  new File(PROJECT_BUILD_DIRECTORY, "dependency/keystore/keycloak.jks"), "secret"));
+            } catch (UnrecoverableKeyException e) {
+                throw new RuntimeException(e);
+            }
+
+            System.setProperty("javax.net.ssl.trustStore", truststore.getAbsolutePath());
+        }
+
+        resteasyClientBuilder
+            .hostnameVerification(ResteasyClientBuilder.HostnameVerificationPolicy.WILDCARD)
+            .connectionPoolSize(NUMBER_OF_CONNECTIONS)
+            .httpEngine(getCustomClientHttpEngine(resteasyClientBuilder, 1, null));
+
+        return resteasyClientBuilder.build();
+    }
+
+    private static SSLContext getSSLContextWithTruststore(File file, String password) throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, KeyManagementException {
         if (!file.isFile()) {
             throw new RuntimeException("Truststore file not found: " + file.getAbsolutePath());
         }
         SSLContext theContext = SSLContexts.custom()
-                .useProtocol("TLS")
+                .setProtocol("TLS")
                 .loadTrustMaterial(file, password == null ? null : password.toCharArray())
                 .build();
+        return theContext;
+    }
+
+    public static SSLContext getSSLContextWithTruststore() {
+        try {
+            if ("true".equals(System.getProperty("auth.server.ssl.required"))) {
+                File truststore = new File(PROJECT_BUILD_DIRECTORY, "dependency/keystore/keycloak.truststore");
+                System.setProperty("javax.net.ssl.trustStore", truststore.getAbsolutePath());
+                return getSSLContextWithTruststore(truststore, "secret");
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return null;
+    }
+
+    private static SSLContext getSSLContextWithTruststoreAndKeystore(
+        File trustStore, String truststorePassword, File keystore, String keystorePassword)
+        throws CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, KeyManagementException, UnrecoverableKeyException {
+        if (!trustStore.isFile()) {
+            throw new RuntimeException("Truststore file not found: " + trustStore.getAbsolutePath());
+        }
+        if (!keystore.isFile()) {
+            throw new RuntimeException("Keystore file not found: " + keystore.getAbsolutePath());
+        }
+
+        KeyStore ks = KeyStore.getInstance("JKS");
+        ks.load(new FileInputStream(keystore), keystorePassword.toCharArray());
+
+        SSLContext theContext = SSLContexts.custom()
+            .setProtocol("TLS")
+            .loadTrustMaterial(trustStore, truststorePassword == null ? null : truststorePassword.toCharArray())
+            .loadKeyMaterial(ks, keystorePassword.toCharArray())
+            .build();
         return theContext;
     }
 
@@ -191,5 +265,5 @@ public class AdminClientUtil {
             return engine;
         }
     }
-   
+
 }

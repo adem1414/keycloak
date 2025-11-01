@@ -17,9 +17,7 @@
 
 package org.keycloak.testsuite.rest;
 
-import org.jboss.resteasy.spi.ResteasyProviderFactory;
 import org.keycloak.Config.Scope;
-import org.keycloak.crypto.Algorithm;
 import org.keycloak.crypto.KeyType;
 import org.keycloak.crypto.KeyUse;
 import org.keycloak.models.KeycloakSession;
@@ -47,7 +45,7 @@ import java.util.concurrent.LinkedBlockingDeque;
 public class TestApplicationResourceProviderFactory implements RealmResourceProviderFactory {
 
     private BlockingQueue<LogoutAction> adminLogoutActions = new LinkedBlockingDeque<>();
-    private BlockingQueue<LogoutToken> backChannelLogoutTokens = new LinkedBlockingDeque<>();
+    private BlockingQueue<String> backChannelLogoutTokens = new LinkedBlockingDeque<>();
     private BlockingQueue<LogoutToken> frontChannelLogoutTokens = new LinkedBlockingDeque<>();
     private BlockingQueue<PushNotBeforeAction> pushNotBeforeActions = new LinkedBlockingDeque<>();
     private BlockingQueue<TestAvailabilityAction> testAvailabilityActions = new LinkedBlockingDeque<>();
@@ -59,12 +57,8 @@ public class TestApplicationResourceProviderFactory implements RealmResourceProv
 
     @Override
     public RealmResourceProvider create(KeycloakSession session) {
-        TestApplicationResourceProvider provider = new TestApplicationResourceProvider(session, adminLogoutActions,
+        return new TestApplicationResourceProvider(session, adminLogoutActions,
                 backChannelLogoutTokens, frontChannelLogoutTokens, pushNotBeforeActions, testAvailabilityActions, oidcClientData, authenticationChannelRequests, cibaClientNotifications, intentClientBindings);
-
-        ResteasyProviderFactory.getInstance().injectProperties(provider);
-
-        return provider;
     }
 
     @Override
@@ -132,6 +126,7 @@ public class TestApplicationResourceProviderFactory implements RealmResourceProv
         private String keyType = KeyType.RSA;
         private String keyAlgorithm;
         private KeyUse keyUse = KeyUse.SIG;
+        private String curve;
 
         // Kid will be randomly generated (based on the key hash) if not provided here
         private String kid;
@@ -198,6 +193,14 @@ public class TestApplicationResourceProviderFactory implements RealmResourceProv
 
         public void setKid(String kid) {
             this.kid = kid;
+        }
+
+        public String getCurve() {
+            return curve;
+        }
+
+        public void setCurve(String curve) {
+            this.curve = curve;
         }
     }
 }

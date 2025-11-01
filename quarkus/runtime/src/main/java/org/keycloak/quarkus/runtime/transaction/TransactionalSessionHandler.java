@@ -17,12 +17,9 @@
 
 package org.keycloak.quarkus.runtime.transaction;
 
-import static org.keycloak.services.resources.KeycloakApplication.getSessionFactory;
-
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
-import org.keycloak.models.KeycloakTransactionManager;
-import org.keycloak.services.DefaultKeycloakSession;
+import org.keycloak.quarkus.runtime.integration.QuarkusKeycloakSessionFactory;
 
 /**
  * <p>A {@link TransactionalSessionHandler} is responsible for managing transaction sessions and its lifecycle. Its subtypes
@@ -32,40 +29,34 @@ import org.keycloak.services.DefaultKeycloakSession;
 public interface TransactionalSessionHandler {
 
     /**
-     * Creates a transactional {@link KeycloakSession}.
+     * Creates a {@link KeycloakSession}.
      *
-     * @return a transactional keycloak session
+     * @return a keycloak session
      */
     default KeycloakSession create() {
-        KeycloakSessionFactory sessionFactory = getSessionFactory();
-        KeycloakSession session = sessionFactory.create();
-        KeycloakTransactionManager tx = session.getTransactionManager();
-        tx.begin();
-        return session;
+        KeycloakSessionFactory sessionFactory = QuarkusKeycloakSessionFactory.getInstance();
+        return sessionFactory.create();
     }
 
     /**
-     * Closes a transactional {@link KeycloakSession}.
+     * begin a transaction if possible
      *
-     * @param session a transactional session
+     * @param session a session
+     */
+    default void beginTransaction(KeycloakSession session) {
+        session.getTransactionManager().begin();
+    }
+
+    /**
+     * Closes a {@link KeycloakSession}.
+     *
+     * @param session a session
      */
     default void close(KeycloakSession session) {
-        if (DefaultKeycloakSession.class.cast(session).isClosed()) {
+        if (session == null || session.isClosed()) {
             return;
         }
 
-        KeycloakTransactionManager tx = session.getTransactionManager();
-
-        try {
-            if (tx.isActive()) {
-                if (tx.getRollbackOnly()) {
-                    tx.rollback();
-                } else {
-                    tx.commit();
-                }
-            }
-        } finally {
-            session.close();
-        }
+        session.close();
     }
 }

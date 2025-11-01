@@ -19,6 +19,8 @@ package org.keycloak.timer;
 
 import org.keycloak.provider.Provider;
 
+import java.util.Map;
+
 /**
  * @author <a href="mailto:sthorger@redhat.com">Stian Thorgersen</a>
  */
@@ -26,8 +28,15 @@ public interface TimerProvider extends Provider {
 
     public void schedule(Runnable runnable, long intervalMillis, String taskName);
 
+    default void schedule(TaskRunner runner, long intervalMillis) {
+        schedule(runner, intervalMillis, runner.getTaskName());
+    }
+
     public void scheduleTask(ScheduledTask scheduledTask, long intervalMillis, String taskName);
 
+    public default void scheduleTask(ScheduledTask scheduledTask, long intervalMillis) {
+        scheduleTask(scheduledTask, intervalMillis, scheduledTask.getTaskName());
+    }
 
     /**
      * Cancel task and return the details about it, so it can be eventually restored later
@@ -37,10 +46,13 @@ public interface TimerProvider extends Provider {
      */
     public TimerTaskContext cancelTask(String taskName);
 
+    public Map<String, TimerTaskContext> getTasks();
 
     interface TimerTaskContext {
 
         Runnable getRunnable();
+
+        long getStartTimeMillis();
 
         long getIntervalMillis();
     }

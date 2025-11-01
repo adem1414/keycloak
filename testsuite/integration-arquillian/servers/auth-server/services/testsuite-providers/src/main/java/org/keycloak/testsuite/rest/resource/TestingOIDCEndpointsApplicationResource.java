@@ -17,16 +17,15 @@
 
 package org.keycloak.testsuite.rest.resource;
 
-import org.jboss.resteasy.annotations.cache.NoCache;
+import org.jboss.resteasy.reactive.NoCache;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
-import javax.ws.rs.BadRequestException;
-import javax.ws.rs.Consumes;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.Consumes;
 
 import org.keycloak.OAuth2Constants;
 import org.keycloak.OAuthErrorException;
-import org.keycloak.common.util.Base64;
 import org.keycloak.common.util.Base64Url;
 import org.keycloak.common.util.KeyUtils;
 import org.keycloak.common.util.PemUtils;
@@ -39,6 +38,7 @@ import org.keycloak.crypto.KeyUse;
 import org.keycloak.crypto.KeyWrapper;
 import org.keycloak.crypto.MacSignatureSignerContext;
 import org.keycloak.crypto.ServerECDSASignatureSignerContext;
+import org.keycloak.crypto.ServerEdDSASignatureSignerContext;
 import org.keycloak.crypto.SignatureSignerContext;
 import org.keycloak.jose.jwe.JWEConstants;
 import org.keycloak.jose.jwk.JSONWebKeySet;
@@ -64,16 +64,16 @@ import org.keycloak.util.JsonSerialization;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-import javax.ws.rs.GET;
-import javax.ws.rs.POST;
-import javax.ws.rs.Path;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.HttpHeaders;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.Response.Status;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.HttpHeaders;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response.Status;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -85,12 +85,10 @@ import java.security.PrivateKey;
 import java.security.SecureRandom;
 import java.security.spec.ECGenParameterSpec;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Stream;
 
@@ -121,6 +119,7 @@ public class TestingOIDCEndpointsApplicationResource {
     @Path("/generate-keys")
     @NoCache
     public Map<String, String> generateKeys(@QueryParam("jwaAlgorithm") String jwaAlgorithm,
+                                            @QueryParam("crv") String curve,
                                             @QueryParam("advertiseJWKAlgorithm") Boolean advertiseJWKAlgorithm,
                                             @QueryParam("keepExistingKeys") Boolean keepExistingKeys,
                                             @QueryParam("kid") String kid) {
@@ -152,6 +151,13 @@ public class TestingOIDCEndpointsApplicationResource {
                     keyType = KeyType.EC;
                     keyPair = generateEcdsaKey("secp521r1");
                     break;
+                case Algorithm.EdDSA:
+                    if (curve == null) {
+                        curve = Algorithm.Ed25519;
+                    }
+                    keyType = KeyType.OKP;
+                    keyPair = generateEddsaKey(curve);
+                    break;
                 case JWEConstants.RSA1_5:
                 case JWEConstants.RSA_OAEP:
                 case JWEConstants.RSA_OAEP_256:
@@ -168,6 +174,7 @@ public class TestingOIDCEndpointsApplicationResource {
             keyData.setKid(kid); // Can be null. It will be generated in that case
             keyData.setKeyPair(keyPair);
             keyData.setKeyType(keyType);
+            keyData.setCurve(curve);
             if (advertiseJWKAlgorithm == null || Boolean.TRUE.equals(advertiseJWKAlgorithm)) {
                 keyData.setKeyAlgorithm(jwaAlgorithm);
             } else {
@@ -183,9 +190,15 @@ public class TestingOIDCEndpointsApplicationResource {
 
     private KeyPair generateEcdsaKey(String ecDomainParamName) throws NoSuchAlgorithmException, InvalidAlgorithmParameterException {
         KeyPairGenerator keyGen = KeyPairGenerator.getInstance("EC");
-        SecureRandom randomGen = SecureRandom.getInstance("SHA1PRNG");
+        SecureRandom randomGen = new SecureRandom();
         ECGenParameterSpec ecSpec = new ECGenParameterSpec(ecDomainParamName);
         keyGen.initialize(ecSpec, randomGen);
+        KeyPair keyPair = keyGen.generateKeyPair();
+        return keyPair;
+    }
+
+    private KeyPair generateEddsaKey(String curveName) throws NoSuchAlgorithmException, InvalidAlgorithmParameterException {
+        KeyPairGenerator keyGen = KeyPairGenerator.getInstance(curveName);
         KeyPair keyPair = keyGen.generateKeyPair();
         return keyPair;
     }
@@ -210,8 +223,8 @@ public class TestingOIDCEndpointsApplicationResource {
     public Map<String, String> getKeysAsBase64() {
         // It seems that PemUtils.decodePrivateKey, decodePublicKey can only treat RSA type keys, not EC type keys. Therefore, these are not used.
         TestApplicationResourceProviderFactory.OIDCKeyData keyData = clientData.getFirstKey();
-        String privateKeyPem = Base64.encodeBytes(keyData.getSigningKeyPair().getPrivate().getEncoded());
-        String publicKeyPem = Base64.encodeBytes(keyData.getSigningKeyPair().getPublic().getEncoded());
+        String privateKeyPem = Base64.getEncoder().encodeToString(keyData.getSigningKeyPair().getPrivate().getEncoded());
+        String publicKeyPem = Base64.getEncoder().encodeToString(keyData.getSigningKeyPair().getPublic().getEncoded());
 
         Map<String, String> res = new HashMap<>();
         res.put(PRIVATE_KEY, privateKeyPem);
@@ -238,6 +251,8 @@ public class TestingOIDCEndpointsApplicationResource {
                         return builder.rsa(keyPair.getPublic(), keyUse);
                     } else if (KeyType.EC.equals(keyType)) {
                         return builder.ec(keyPair.getPublic());
+                    } else if (KeyType.OKP.equals(keyType)) {
+                        return builder.okp(keyPair.getPublic());
                     } else {
                         throw new IllegalArgumentException("Unknown keyType: " + keyType);
                     }
@@ -326,6 +341,10 @@ public class TestingOIDCEndpointsApplicationResource {
                 case Algorithm.ES512:
                     signer = new ServerECDSASignatureSignerContext(keyWrapper);
                     break;
+                case Algorithm.EdDSA:
+                    keyWrapper.setCurve(keyData.getCurve());
+                    signer = new ServerEdDSASignatureSignerContext(keyWrapper);
+                    break;
                 default:
                     signer = new AsymmetricSignatureSignerContext(keyWrapper);
             }
@@ -374,6 +393,7 @@ public class TestingOIDCEndpointsApplicationResource {
             case Algorithm.ES256:
             case Algorithm.ES384:
             case Algorithm.ES512:
+            case Algorithm.EdDSA:
             case Algorithm.HS256:
             case Algorithm.HS384:
             case Algorithm.HS512:
@@ -453,6 +473,9 @@ public class TestingOIDCEndpointsApplicationResource {
 
         @JsonProperty(OIDCLoginProtocol.CODE_CHALLENGE_METHOD_PARAM)
         String codeChallengeMethod;
+
+        @JsonProperty(OIDCLoginProtocol.DPOP_JKT)
+        String dpopJkt;
 
         @JsonProperty(AdapterConstants.KC_IDP_HINT)
         String idpHint;
@@ -589,6 +612,14 @@ public class TestingOIDCEndpointsApplicationResource {
 
         public void setCodeChallengeMethod(String codeChallengeMethod) {
             this.codeChallengeMethod = codeChallengeMethod;
+        }
+
+        public String getDpopJkt() {
+            return dpopJkt;
+        }
+
+        public void setDpopJkt(String dpopJkt) {
+            this.dpopJkt = dpopJkt;
         }
 
         public String getDisplay() {

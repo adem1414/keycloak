@@ -13,17 +13,20 @@ Keycloak is an Open Source community-driven project and we welcome contributions
 Firstly, if you want to contribute a larger change to Keycloak we ask that you open a 
 discussion first. For minor changes you can skip this part and go straight ahead to sending a contribution. Bear in mind that if you open a discussion first you can identify if the change will be accepted, as well as getting early feedback.  
 
+Each PR, no matter how small, should have a GitHub issue associated with it.
+Issues are important for administrative purposes such as generating a changelog and handling backports.
+
 Here's a quick checklist for a good PR, more details below:
 
 1. A discussion around the change (https://github.com/keycloak/keycloak/discussions/categories/ideas)
-2. A GitHub Issue with a good description associated with the PR
-3. One feature/change per PR
-4. One commit per PR
-5. PR rebased on main (`git rebase`, not `git pull`) 
-5. [Good descriptive commit message, with link to issue](#commit-messages-and-issue-linking)
-6. No changes to code not directly related to your PR
-7. Includes functional/integration test
-8. Includes documentation
+1. A GitHub Issue with a good description associated with the PR
+1. One feature/change per PR
+1. One commit per PR
+1. PR rebased on main (`git rebase`, not `git pull`) 
+1. [Good descriptive commit message, with link to issue](#commit-messages-and-issue-linking)
+1. No changes to code not directly related to your PR
+1. Includes functional/integration test
+1. Includes documentation
 
 Once you have submitted your PR please monitor it for comments/feedback. We reserve the right to close inactive PRs if
 you do not respond within 2 weeks (bear in mind you can always open a new PR if it is closed due to inactivity).
@@ -73,9 +76,7 @@ in the same way as we have written our tests.
 
 ### Documentation
 
-We require contributions to include relevant documentation. Alongside your PR for code changes, prepare a PR to the [Keycloak Documentation](https://github.com/keycloak/keycloak-documentation).
-
-In the description of your PR include a link to the PR to [Keycloak Documentation](https://github.com/keycloak/keycloak-documentation).
+We require contributions to include relevant documentation. Before submitting your code changes, please take the time to review the [documentation](docs/documentation/README.md) guide and ensure that any necessary documentation changes are included in your pull request.
 
 ### Submitting your PR
 
@@ -95,6 +96,47 @@ our automatic merging process.
 Please, also provide a good description [commit message, with a link to the issue](#commit-messages-and-issue-linking).
 We also require that the commit message includes a link to the issue ([linking a pull request to an issue](https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue)).
 
+### Developer's Certificate of Origin
+
+Any contributions to Keycloak must only contain code that can legally be contributed to Keycloak, and which the Keycloak
+project can distribute under its license.
+
+Prior to contributing to Keycloak please read the [Developer's Certificate of Origin](https://developercertificate.org/)
+and sign-off all commits with the `--signoff` option provided by `git commit`. For example:
+
+```
+git commit --signoff --message "This is the commit message"
+```
+
+This option adds a `Signed-off-by` trailer at the end of the commit log message.
+
+### Spotless
+
+Spotless is used to check and apply code formatting. To check your code locally before sending a PR run:
+
+```
+./mvnw spotless:check
+```
+
+You can either use your IDE to fix these issues; or Spotless can fix them for you by running:
+
+```
+./mvnw spotless:apply
+```
+
+A good practice is to create a commit with your changes prior to running `spotless:apply` then you can see and
+review what changes Spotless has applied, for example by using a diff tool. Finally, if you are happy with the changes
+Spotless has applied you can amend the changes to your commit by running:
+
+```
+git add -a
+git commit --amend
+```
+
+Note: If you get the error `Could not find goal 'verify' in plugin com.diffplug.spotless:spotless-maven-plugin` you are
+probably running `mvn spotless:check` instead of `./mvnw spotless:check`. This is most likely a bug in Maven or the 
+Spotless plugin.
+ 
 ### Commit messages and issue linking
 
 The format for a commit message should look like:
@@ -132,3 +174,7 @@ $ git commit -m "Summary
 ```
 
 For more information linking PRs to issues refer to the [GitHub Documentation](https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue).
+
+### Contributing Translations
+
+In order to provide translations for Keycloak, kindly follow the instructions provided in [Translation Docs](./docs/translation.md).

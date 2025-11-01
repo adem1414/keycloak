@@ -38,12 +38,15 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response;
 import org.jboss.arquillian.graphene.page.Page;
 import org.junit.Before;
 import org.junit.Test;
@@ -63,7 +66,7 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.keycloak.testsuite.broker.BrokerTestConstants.REALM_CONS_NAME;
 import static org.keycloak.testsuite.broker.BrokerTestConstants.REALM_PROV_NAME;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThat;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -94,9 +97,9 @@ public class KcSamlIdPInitiatedSsoTest extends AbstractKeycloakTest {
     private RealmRepresentation loadFromClasspath(String fileName, Properties properties) {
         InputStream is = KcSamlIdPInitiatedSsoTest.class.getResourceAsStream(fileName);
         try {
-            String template = StreamUtil.readString(is);
-            String realmString = StringPropertyReplacer.replaceProperties(template, properties);
-            return IOUtil.loadRealm(new ByteArrayInputStream(realmString.getBytes("UTF-8")));
+            String template = StreamUtil.readString(is, Charset.defaultCharset());
+            String realmString = StringPropertyReplacer.replaceProperties(template, properties::getProperty);
+            return IOUtil.loadRealm(new ByteArrayInputStream(realmString.getBytes(StandardCharsets.UTF_8)));
         } catch (IOException ex) {
             throw new RuntimeException(ex);
         }
@@ -137,7 +140,7 @@ public class KcSamlIdPInitiatedSsoTest extends AbstractKeycloakTest {
         p.put("url.realm.provider", urlRealmProvider);
         p.put("url.realm.consumer", urlRealmConsumer);
         p.put("url.realm.consumer-2", urlRealmConsumer2);
-        
+
         testRealms.add(loadFromClasspath("kc3731-provider-realm.json", p));
         testRealms.add(loadFromClasspath("kc3731-broker-realm.json", p));
     }
@@ -148,7 +151,7 @@ public class KcSamlIdPInitiatedSsoTest extends AbstractKeycloakTest {
 
         waitForPage("sign in to", true);
 
-        Assert.assertThat("Driver should be on the provider realm page right now",
+        assertThat("Driver should be on the provider realm page right now",
                 driver.getCurrentUrl(), containsString("/auth/realms/" + REALM_PROV_NAME + "/"));
 
         log.debug("Logging in");
@@ -157,7 +160,7 @@ public class KcSamlIdPInitiatedSsoTest extends AbstractKeycloakTest {
         waitForPage("update account information", false);
 
         Assert.assertTrue(updateAccountInformationPage.isCurrent());
-        Assert.assertThat("We must be on consumer realm right now",
+        assertThat("We must be on consumer realm right now",
                 driver.getCurrentUrl(), containsString("/auth/realms/" + REALM_CONS_NAME + "/"));
 
         log.debug("Updating info on updateAccount page");
@@ -173,7 +176,7 @@ public class KcSamlIdPInitiatedSsoTest extends AbstractKeycloakTest {
         boolean isUserFound = users.stream().anyMatch(user -> user.getUsername().equals(CONSUMER_CHOSEN_USERNAME) && user.getEmail().equals("test@localhost"));
         Assert.assertTrue("There must be user " + CONSUMER_CHOSEN_USERNAME + " in realm " + REALM_CONS_NAME, isUserFound);
 
-        Assert.assertThat(driver.findElement(By.tagName("a")).getAttribute("id"), containsString("account"));
+        assertThat(driver.findElement(By.tagName("a")).getAttribute("id"), containsString("account"));
     }
 
     private String getSamlIdpInitiatedUrl(String realmName, String samlIdpInitiatedSsoUrlName) {
@@ -189,7 +192,7 @@ public class KcSamlIdPInitiatedSsoTest extends AbstractKeycloakTest {
     }
 
     private void waitForPage(final String title, final boolean htmlTitle) {
-        WebDriverWait wait = new WebDriverWait(driver, 5);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(5));
 
         ExpectedCondition<Boolean> condition = (WebDriver input) -> htmlTitle ? input.getTitle().toLowerCase().contains(title) : PageUtils.getPageTitle(input).toLowerCase().contains(title);
 
@@ -397,7 +400,7 @@ public class KcSamlIdPInitiatedSsoTest extends AbstractKeycloakTest {
         assertThat(fed.getUserId(), is(PROVIDER_REALM_USER_NAME));
         assertThat(fed.getUserName(), is(PROVIDER_REALM_USER_NAME));
     }
-    
+
     @Test
     public void testProviderTransientIdpInitiatedLogin() throws Exception {
         IdentityProviderResource idp = adminClient.realm(REALM_CONS_NAME).identityProviders().get("saml-leaf");
@@ -424,7 +427,7 @@ public class KcSamlIdPInitiatedSsoTest extends AbstractKeycloakTest {
                 nameId.setFormat(URI.create(JBossSAMLURIConstants.NAMEID_FORMAT_TRANSIENT.get()));
                 nameId.setValue("subjectId1" );
                 resp.getAssertions().get(0).getAssertion().getSubject().getSubType().addBaseID(nameId);
-                
+
                 Set<StatementAbstractType> statements = resp.getAssertions().get(0).getAssertion().getStatements();
 
                 AttributeStatementType attributeType = (AttributeStatementType) statements.stream()
@@ -446,7 +449,7 @@ public class KcSamlIdPInitiatedSsoTest extends AbstractKeycloakTest {
 
           // Login in provider realm
           .login().sso(true).build()
-          
+
           .processSamlResponse(Binding.POST)
           .transformObject(ob -> {
               assertThat(ob, Matchers.isSamlResponse(JBossSAMLURIConstants.STATUS_SUCCESS));
@@ -458,7 +461,7 @@ public class KcSamlIdPInitiatedSsoTest extends AbstractKeycloakTest {
               nameId.setFormat(URI.create(JBossSAMLURIConstants.NAMEID_FORMAT_TRANSIENT.get()));
               nameId.setValue("subjectId2" );
               resp.getAssertions().get(0).getAssertion().getSubject().getSubType().addBaseID(nameId);
-              
+
               Set<StatementAbstractType> statements = resp.getAssertions().get(0).getAssertion().getStatements();
 
               AttributeStatementType attributeType = (AttributeStatementType) statements.stream()
@@ -485,7 +488,7 @@ public class KcSamlIdPInitiatedSsoTest extends AbstractKeycloakTest {
         ResponseType resp = (ResponseType) samlResponse.getSamlObject();
         assertThat(resp.getDestination(), is(urlRealmConsumer + "/app/auth2/saml"));
         assertAudience(resp, urlRealmConsumer + "/app/auth2");
-        
+
         UsersResource users = adminClient.realm(REALM_CONS_NAME).users();
         List<UserRepresentation> userList= users.search(CONSUMER_CHOSEN_USERNAME);
         assertEquals(1, userList.size());
@@ -493,7 +496,7 @@ public class KcSamlIdPInitiatedSsoTest extends AbstractKeycloakTest {
         FederatedIdentityRepresentation fed = users.get(id).getFederatedIdentity().get(0);
         assertThat(fed.getUserId(), is(PROVIDER_REALM_USER_NAME));
         assertThat(fed.getUserName(), is(PROVIDER_REALM_USER_NAME));
-        
+
         //check that no user with sent subject-id was sent
         userList = users.search("subjectId1");
         assertTrue(userList.isEmpty());

@@ -17,6 +17,9 @@
 
 package org.keycloak.keys;
 
+import java.util.function.Supplier;
+
+import org.keycloak.common.crypto.CryptoIntegration;
 import org.keycloak.crypto.Algorithm;
 import org.keycloak.crypto.KeyUse;
 import org.keycloak.jose.jwe.JWEConstants;
@@ -45,11 +48,23 @@ public interface Attributes {
     ProviderConfigProperty CERTIFICATE_PROPERTY = new ProviderConfigProperty(CERTIFICATE_KEY, "X509 Certificate", "X509 Certificate encoded in PEM format", FILE_TYPE, null);
 
     String KEY_SIZE_KEY = "keySize";
-    ProviderConfigProperty KEY_SIZE_PROPERTY = new ProviderConfigProperty(KEY_SIZE_KEY, "Key size", "Size for the generated keys", LIST_TYPE, "2048", "1024", "2048", "4096");
+    Supplier<ProviderConfigProperty> KEY_SIZE_PROPERTY = () -> new ProviderConfigProperty(KEY_SIZE_KEY, "Key size", "Size for the generated keys", LIST_TYPE, "2048",
+            CryptoIntegration.getProvider().getSupportedRsaKeySizes());
 
     String KEY_USE = "keyUse";
     ProviderConfigProperty KEY_USE_PROPERTY = new ProviderConfigProperty(KEY_USE, "Key use", "Whether the key should be used for signing or encryption.", LIST_TYPE,
             KeyUse.SIG.getSpecName(), KeyUse.SIG.getSpecName(), KeyUse.ENC.getSpecName());
+
+    String EC_GENERATE_CERTIFICATE_KEY = "ecGenerateCertificate";
+    ProviderConfigProperty EC_GENERATE_CERTIFICATE_PROPERTY = new ProviderConfigProperty(
+            EC_GENERATE_CERTIFICATE_KEY,
+            "Generate Certificate",
+            """
+            If a certificate should be build on creation. If the certificate is build, it will be available in the \
+            realm JWK for the key in the claim x5c and corresponding thumbprints may be available in the claims like \
+            x5t or x5t#S256.""",
+            BOOLEAN_TYPE,
+            false);
 
     String KID_KEY = "kid";
 
@@ -67,7 +82,7 @@ public interface Attributes {
             Algorithm.RS256, Algorithm.RS384, Algorithm.RS512, Algorithm.PS256, Algorithm.PS384, Algorithm.PS512);
 
     ProviderConfigProperty HS_ALGORITHM_PROPERTY = new ProviderConfigProperty(ALGORITHM_KEY, "Algorithm", "Intended algorithm for the key", LIST_TYPE,
-            Algorithm.HS256,
+            Algorithm.HS512,
             Algorithm.HS256, Algorithm.HS384, Algorithm.HS512);
 
     ProviderConfigProperty RS_ENC_ALGORITHM_PROPERTY = new ProviderConfigProperty(ALGORITHM_KEY, "Algorithm", "Intended algorithm for the key encryption", LIST_TYPE,

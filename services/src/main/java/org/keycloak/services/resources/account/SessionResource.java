@@ -16,14 +16,14 @@
  */
 package org.keycloak.services.resources.account;
 
-import javax.ws.rs.DELETE;
-import javax.ws.rs.GET;
-import javax.ws.rs.Path;
-import javax.ws.rs.PathParam;
-import javax.ws.rs.Produces;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.PathParam;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -31,8 +31,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.jboss.resteasy.annotations.cache.NoCache;
-import org.jboss.resteasy.spi.HttpRequest;
+import org.jboss.resteasy.reactive.NoCache;
 import org.keycloak.device.DeviceActivityManager;
 import org.keycloak.models.AccountRoles;
 import org.keycloak.models.ClientModel;
@@ -46,8 +45,6 @@ import org.keycloak.representations.account.SessionRepresentation;
 import org.keycloak.services.managers.Auth;
 import org.keycloak.services.managers.AuthenticationManager;
 
-import static org.keycloak.utils.LockObjectsForModification.lockUserSessionsForModification;
-
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
  */
@@ -57,14 +54,12 @@ public class SessionResource {
     private final Auth auth;
     private final RealmModel realm;
     private final UserModel user;
-    private HttpRequest request;
 
-    public SessionResource(KeycloakSession session, Auth auth, HttpRequest request) {
+    public SessionResource(KeycloakSession session, Auth auth) {
         this.session = session;
         this.auth = auth;
         this.realm = auth.getRealm();
         this.user = auth.getUser();
-        this.request = request;
     }
 
     /**
@@ -149,7 +144,7 @@ public class SessionResource {
     @NoCache
     public Response logout(@PathParam("id") String id) {
         auth.require(AccountRoles.MANAGE_ACCOUNT);
-        UserSessionModel userSession = lockUserSessionsForModification(session, () -> session.sessions().getUserSession(realm, id));
+        UserSessionModel userSession = session.sessions().getUserSession(realm, id);
         if (userSession != null && userSession.getUser().equals(user)) {
             AuthenticationManager.backchannelLogout(session, userSession, true);
         }
@@ -163,7 +158,10 @@ public class SessionResource {
         sessionRep.setIpAddress(s.getIpAddress());
         sessionRep.setStarted(s.getStarted());
         sessionRep.setLastAccess(s.getLastSessionRefresh());
-        sessionRep.setExpires(s.getStarted() + realm.getSsoSessionMaxLifespan());
+        int maxLifespan = s.isRememberMe() && realm.getSsoSessionMaxLifespanRememberMe() > 0
+                ? realm.getSsoSessionMaxLifespanRememberMe() : realm.getSsoSessionMaxLifespan();
+        int expires = s.getStarted() + maxLifespan;
+        sessionRep.setExpires(expires);
         sessionRep.setBrowser(device.getBrowser());
 
         if (isCurrentSession(s)) {
@@ -174,10 +172,12 @@ public class SessionResource {
 
         for (String clientUUID : s.getAuthenticatedClientSessions().keySet()) {
             ClientModel client = realm.getClientById(clientUUID);
-            ClientRepresentation clientRep = new ClientRepresentation();
-            clientRep.setClientId(client.getClientId());
-            clientRep.setClientName(client.getName());
-            sessionRep.getClients().add(clientRep);
+            if (client != null) {
+                ClientRepresentation clientRep = new ClientRepresentation();
+                clientRep.setClientId(client.getClientId());
+                clientRep.setClientName(client.getName());
+                sessionRep.getClients().add(clientRep);
+            }
         }
         return sessionRep;
     }

@@ -35,18 +35,17 @@ import org.keycloak.representations.AccessToken;
 import org.keycloak.representations.IDToken;
 import org.keycloak.saml.common.util.StringUtil;
 import org.keycloak.services.ErrorResponseException;
+import org.keycloak.services.managers.AuthenticationManager;
 import org.keycloak.services.util.DefaultClientSessionContext;
 import org.keycloak.util.JsonSerialization;
 
-import javax.ws.rs.core.Response.Status;
+import jakarta.ws.rs.core.Response.Status;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-
-import static org.keycloak.utils.LockObjectsForModification.lockUserSessionsForModification;
 
 /**
  * @author <a href="mailto:psilva@redhat.com">Pedro Igor</a>
@@ -99,13 +98,21 @@ public class KeycloakIdentity implements Identity {
                         values.add(valueIterator.next().asText());
                     }
                 } else {
-                    String value = fieldValue.asText();
+                    // If the claim is key value pair then just take it as is to attributes.
+                    if(!fieldValue.isObject()) {
+                        String value = fieldValue.asText();
 
-                    if (StringUtil.isNullOrEmpty(value)) {
-                        continue;
+                        if (StringUtil.isNullOrEmpty(value)) {
+                            continue;
+                        }
+                        values.add(value);
                     }
-
-                    values.add(value);
+                    // otherwise, the claim is a JSON object, turn it into json String, so it'll be able to evaluate it later
+                    // in the regex policy evaluator
+                    else
+                    {
+                        values.add(fieldValue.toString());
+                    }
                 }
 
                 if (!values.isEmpty()) {
@@ -120,14 +127,18 @@ public class KeycloakIdentity implements Identity {
             this.accessToken = AccessToken.class.cast(token);
         } else {
             UserSessionProvider sessions = keycloakSession.sessions();
-            UserSessionModel userSession = lockUserSessionsForModification(keycloakSession, () -> sessions.getUserSession(realm, token.getSessionState()));
+            UserSessionModel userSession = sessions.getUserSession(realm, token.getSessionState());
 
             if (userSession == null) {
                 userSession = sessions.getOfflineUserSession(realm, token.getSessionState());
             }
-            
+
             if (userSession == null) {
                 throw new RuntimeException("No active session associated with the token");
+            }
+
+            if (AuthenticationManager.isSessionValid(realm, userSession) && token.isIssuedBeforeSessionStart(userSession.getStarted())) {
+                throw new RuntimeException("Invalid token");
             }
 
             ClientModel client = realm.getClientByClientId(token.getIssuedFor());
@@ -170,15 +181,22 @@ public class KeycloakIdentity implements Identity {
     }
 
     public KeycloakIdentity(AccessToken accessToken, KeycloakSession keycloakSession) {
+        this(accessToken, keycloakSession, keycloakSession.getContext().getRealm());
+    }
+
+    public KeycloakIdentity(AccessToken accessToken, KeycloakSession keycloakSession, RealmModel realm) {
         if (accessToken == null) {
             throw new ErrorResponseException("invalid_bearer_token", "Could not obtain bearer access_token from request.", Status.FORBIDDEN);
         }
         if (keycloakSession == null) {
             throw new ErrorResponseException("no_keycloak_session", "No keycloak session", Status.FORBIDDEN);
         }
+        if (realm == null) {
+            throw new ErrorResponseException("no_keycloak_session", "No realm set", Status.FORBIDDEN);
+        }
         this.accessToken = accessToken;
         this.keycloakSession = keycloakSession;
-        this.realm = keycloakSession.getContext().getRealm();
+        this.realm = realm;
 
         Map<String, Collection<String>> attributes = new HashMap<>();
 
@@ -234,6 +252,9 @@ public class KeycloakIdentity implements Identity {
             }
 
             UserModel userSession = getUserFromToken();
+            if (userSession == null) {
+                throw new IllegalArgumentException("User from token not found");
+            }
 
             this.resourceServer = clientUser != null && userSession.getId().equals(clientUser.getId());
 
@@ -285,13 +306,21 @@ public class KeycloakIdentity implements Identity {
             return TokenManager.lookupUserFromStatelessToken(keycloakSession, realm, accessToken);
         }
 
+        // Avoid further loookup if verified userSession already set in the context
+        UserSessionModel userSession = keycloakSession.getContext().getUserSession();
+        if (userSession != null && accessToken.getSessionState().equals(userSession.getId())) {
+            return userSession.getUser();
+        }
+
         UserSessionProvider sessions = keycloakSession.sessions();
-        UserSessionModel userSession = lockUserSessionsForModification(keycloakSession, () -> sessions.getUserSession(realm, accessToken.getSessionState()));
+        userSession = sessions.getUserSession(realm, accessToken.getSessionState());
 
         if (userSession == null) {
             userSession = sessions.getOfflineUserSession(realm, accessToken.getSessionState());
         }
-
+        if (AuthenticationManager.isSessionValid(realm, userSession) && accessToken.isIssuedBeforeSessionStart(userSession.getStarted())) {
+            return null;
+        }
         return userSession.getUser();
     }
 }

@@ -21,6 +21,16 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import org.keycloak.common.util.Base64Url;
+import org.keycloak.common.util.MultivaluedMap;
+import org.keycloak.crypto.KeyType;
+import org.keycloak.crypto.KeyUse;
+import org.keycloak.jose.jwk.ECPublicJWK;
+import org.keycloak.jose.jwk.JWK;
+import org.keycloak.jose.jwk.JWKBuilder;
+import org.keycloak.jose.jws.Algorithm;
+import org.keycloak.jose.jws.JWSHeader;
+import org.keycloak.models.utils.MapperTypeSerializer;
 import org.keycloak.protocol.oidc.grants.ciba.clientpolicy.executor.SecureCibaAuthenticationRequestSigningAlgorithmExecutor;
 import org.keycloak.representations.idm.ClientPoliciesRepresentation;
 import org.keycloak.representations.idm.ClientPolicyConditionConfigurationRepresentation;
@@ -32,31 +42,49 @@ import org.keycloak.representations.idm.ClientProfileRepresentation;
 import org.keycloak.representations.idm.ClientProfilesRepresentation;
 import org.keycloak.services.clientpolicy.ClientPolicyEvent;
 import org.keycloak.services.clientpolicy.condition.ClientAccessTypeCondition;
+import org.keycloak.services.clientpolicy.condition.ClientAttributesCondition;
 import org.keycloak.services.clientpolicy.condition.ClientRolesCondition;
 import org.keycloak.services.clientpolicy.condition.ClientScopesCondition;
 import org.keycloak.services.clientpolicy.condition.ClientUpdaterContextCondition;
 import org.keycloak.services.clientpolicy.condition.ClientUpdaterSourceGroupsCondition;
 import org.keycloak.services.clientpolicy.condition.ClientUpdaterSourceHostsCondition;
 import org.keycloak.services.clientpolicy.condition.ClientUpdaterSourceRolesCondition;
+import org.keycloak.services.clientpolicy.condition.GrantTypeCondition;
 import org.keycloak.services.clientpolicy.executor.ConsentRequiredExecutor;
+import org.keycloak.services.clientpolicy.executor.DPoPBindEnforcerExecutor;
 import org.keycloak.services.clientpolicy.executor.FullScopeDisabledExecutor;
 import org.keycloak.services.clientpolicy.executor.HolderOfKeyEnforcerExecutor;
 import org.keycloak.services.clientpolicy.executor.IntentClientBindCheckExecutor;
 import org.keycloak.services.clientpolicy.executor.PKCEEnforcerExecutor;
 import org.keycloak.services.clientpolicy.executor.RejectResourceOwnerPasswordCredentialsGrantExecutor;
+import org.keycloak.services.clientpolicy.executor.RejectImplicitGrantExecutor;
 import org.keycloak.services.clientpolicy.executor.SecureClientAuthenticatorExecutor;
+import org.keycloak.services.clientpolicy.executor.SecureRedirectUrisEnforcerExecutor;
 import org.keycloak.services.clientpolicy.executor.SecureRequestObjectExecutor;
 import org.keycloak.services.clientpolicy.executor.SecureResponseTypeExecutor;
 import org.keycloak.services.clientpolicy.executor.SecureSigningAlgorithmExecutor;
 import org.keycloak.services.clientpolicy.executor.SecureSigningAlgorithmForSignedJwtExecutor;
 import org.keycloak.testsuite.services.clientpolicy.condition.TestRaiseExceptionCondition;
 import org.keycloak.testsuite.services.clientpolicy.executor.TestRaiseExceptionExecutor;
+import org.keycloak.util.DPoPGenerator;
 import org.keycloak.util.JsonSerialization;
 
+import java.io.IOException;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.Key;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.SecureRandom;
+import java.security.interfaces.ECPublicKey;
+import java.security.spec.ECGenParameterSpec;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.junit.Assert.fail;
+import static org.keycloak.jose.jwk.JWKUtil.toIntegerBytes;
 
 public final class ClientPoliciesUtil {
 
@@ -183,10 +211,15 @@ public final class ClientPoliciesUtil {
     }
 
     public static SecureRequestObjectExecutor.Configuration createSecureRequestObjectExecutorConfig(Integer availablePeriod, Boolean verifyNbf, Boolean encryptionRequired) {
+        return createSecureRequestObjectExecutorConfig(availablePeriod, verifyNbf, encryptionRequired, null);
+    }
+
+    public static SecureRequestObjectExecutor.Configuration createSecureRequestObjectExecutorConfig(Integer availablePeriod, Boolean verifyNbf, Boolean encryptionRequired, Integer allowedClockSkew) {
         SecureRequestObjectExecutor.Configuration config = new SecureRequestObjectExecutor.Configuration();
         if (availablePeriod != null) config.setAvailablePeriod(availablePeriod);
         if (verifyNbf != null) config.setVerifyNbf(verifyNbf);
         if (encryptionRequired != null) config.setEncryptionRequired(encryptionRequired);
+        if (allowedClockSkew != null) config.setAllowedClockSkew(allowedClockSkew);
         return config;
     }
 
@@ -221,10 +254,33 @@ public final class ClientPoliciesUtil {
         return config;
     }
 
+    public static RejectImplicitGrantExecutor.Configuration createRejectImplicitGrantExecutorConfig(Boolean autoConfigure) {
+        RejectImplicitGrantExecutor.Configuration config = new RejectImplicitGrantExecutor.Configuration();
+        config.setAutoConfigure(autoConfigure);
+        return config;
+    }
+
     public static IntentClientBindCheckExecutor.Configuration createIntentClientBindCheckExecutorConfig(String intentName, String endpoint) {
         IntentClientBindCheckExecutor.Configuration config = new IntentClientBindCheckExecutor.Configuration();
         config.setIntentName(intentName);
         config.setIntentClientBindCheckEndpoint(endpoint);
+        return config;
+    }
+
+    public static DPoPBindEnforcerExecutor.Configuration createDPoPBindEnforcerExecutorConfig(Boolean autoConfigure, Boolean enforceAuthorizationCodeBindingToDpop, Boolean bindRefreshToken) {
+        DPoPBindEnforcerExecutor.Configuration config = new DPoPBindEnforcerExecutor.Configuration();
+        config.setAutoConfigure(autoConfigure);
+        config.setEnforceAuthorizationCodeBindingToDpop(enforceAuthorizationCodeBindingToDpop);
+        config.setAllowOnlyRefreshTokenBinding(bindRefreshToken);
+        return config;
+    }
+
+    public static SecureRedirectUrisEnforcerExecutor.Configuration createSecureRedirectUrisEnforcerExecutorConfig(
+            Consumer<SecureRedirectUrisEnforcerExecutor.Configuration> apply) {
+        SecureRedirectUrisEnforcerExecutor.Configuration config = new SecureRedirectUrisEnforcerExecutor.Configuration();
+        if (apply != null) {
+            apply.accept(config);
+        }
         return config;
     }
 
@@ -283,6 +339,9 @@ public final class ClientPoliciesUtil {
         }
 
         public ClientPolicyBuilder addCondition(String providerId, ClientPolicyConditionConfigurationRepresentation config) throws Exception {
+            if (config == null) {
+                config = new ClientPolicyConditionConfigurationRepresentation();
+            }
             ClientPolicyConditionRepresentation condition = new ClientPolicyConditionRepresentation();
             condition.setConditionProviderId(providerId);
             condition.setConfiguration(JsonSerialization.mapper.readValue(JsonSerialization.mapper.writeValueAsBytes(config), JsonNode.class));
@@ -351,6 +410,13 @@ public final class ClientPoliciesUtil {
         return config;
     }
 
+    public static ClientAttributesCondition.Configuration createClientAttributesConditionConfig(MultivaluedMap<String, String> attributes) {
+        ClientAttributesCondition.Configuration config = new ClientAttributesCondition.Configuration();
+        String attrsAsString = MapperTypeSerializer.serialize(attributes);
+        config.setAttributes(attrsAsString);
+        return config;
+    }
+
     public static ClientUpdaterContextCondition.Configuration createClientUpdateContextConditionConfig(List<String> updateClientSource) {
         ClientUpdaterContextCondition.Configuration config = new ClientUpdaterContextCondition.Configuration();
         config.setUpdateClientSource(updateClientSource);
@@ -373,5 +439,57 @@ public final class ClientPoliciesUtil {
         ClientUpdaterSourceRolesCondition.Configuration config = new ClientUpdaterSourceRolesCondition.Configuration();
         config.setRoles(roles);
         return config;
+    }
+
+    public static GrantTypeCondition.Configuration createGrantTypeConditionConfig(List<String> grantTypes) {
+        GrantTypeCondition.Configuration config = new GrantTypeCondition.Configuration();
+        config.setGrantTypes(grantTypes);
+        return config;
+    }
+
+    // DPoP
+    public static  JWK createRsaJwk(Key publicKey) {
+        return JWKBuilder.create()
+                .rsa(publicKey, KeyUse.SIG);
+    }
+
+    public static JWK createEcJwk(Key publicKey) {
+        ECPublicKey ecKey = (ECPublicKey) publicKey;
+
+        int fieldSize = ecKey.getParams().getCurve().getField().getFieldSize();
+        ECPublicJWK k = new ECPublicJWK();
+        k.setKeyType(KeyType.EC);
+        k.setCrv("P-" + fieldSize);
+        k.setX(Base64Url.encode(toIntegerBytes(ecKey.getW().getAffineX(), fieldSize)));
+        k.setY(Base64Url.encode(toIntegerBytes(ecKey.getW().getAffineY(), fieldSize)));
+
+        return k;
+    }
+
+    public static KeyPair generateEcdsaKey(String ecDomainParamName) throws NoSuchAlgorithmException, InvalidAlgorithmParameterException {
+        KeyPairGenerator keyGen = KeyPairGenerator.getInstance("EC");
+        SecureRandom randomGen = new SecureRandom();
+        ECGenParameterSpec ecSpec = new ECGenParameterSpec(ecDomainParamName);
+        keyGen.initialize(ecSpec, randomGen);
+        KeyPair keyPair = keyGen.generateKeyPair();
+        return keyPair;
+    }
+
+    public static String generateSignedDPoPProof(String jti, String htm, String htu, Long iat, String algorithm, JWSHeader jwsHeader, PrivateKey privateKey, String accessToken) throws IOException {
+        return generateSignedDPoPProof(jti, htm, htu, iat, algorithm, jwsHeader, privateKey, accessToken, new DPoPGenerator());
+    }
+
+    public static String generateSignedDPoPProof(String jti, String htm, String htu, Long iat, String algorithm, JWSHeader jwsHeader, PrivateKey privateKey, String accessToken, DPoPGenerator dpopGenerator) throws IOException {
+        if (algorithm.equals(jwsHeader.getAlgorithm().toString())) {
+            return dpopGenerator.generateSignedDPoPProof(jti, htm, htu, iat, jwsHeader, privateKey, accessToken);
+        } else {
+            // Ability to test failure scenarios when different algorithms are used for the JWSHeader and for the actual key
+            JWSHeader updatedHeader = new JWSHeader(Algorithm.valueOf(algorithm), jwsHeader.getType(), jwsHeader.getKeyId(), jwsHeader.getKey());
+            String dpop = dpopGenerator.generateSignedDPoPProof(jti, htm, htu, iat, updatedHeader, privateKey, accessToken);
+            String dpopOrigHeader = Base64Url.encode(JsonSerialization.writeValueAsBytes(jwsHeader));
+            // Replace header with the original algorithm
+            String updatedAlgorithmHeader = dpop.substring(0, dpop.indexOf('.'));
+            return dpop.replace(updatedAlgorithmHeader, dpopOrigHeader);
+        }
     }
 }

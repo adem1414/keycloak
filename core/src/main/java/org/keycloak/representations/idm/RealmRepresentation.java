@@ -20,6 +20,8 @@ package org.keycloak.representations.idm;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
+
+import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.jboss.logging.Logger;
 import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.util.JsonSerialization;
@@ -90,6 +92,8 @@ public class RealmRepresentation {
     //--- brute force settings
     protected Boolean bruteForceProtected;
     protected Boolean permanentLockout;
+    protected Integer maxTemporaryLockouts;
+    protected BruteForceStrategy bruteForceStrategy;
     protected Integer maxFailureWaitSeconds;
     protected Integer minimumQuickLoginWaitSeconds;
     protected Integer waitIncrementSeconds;
@@ -111,6 +115,7 @@ public class RealmRepresentation {
     @Deprecated
     protected List<String> defaultRoles;
     protected RoleRepresentation defaultRole;
+    protected ClientRepresentation adminPermissionsClient;
     protected List<String> defaultGroups;
     @Deprecated
     protected Set<String> requiredCredentials;
@@ -123,6 +128,7 @@ public class RealmRepresentation {
     protected Integer otpPolicyPeriod;
     protected Boolean otpPolicyCodeReusable;
     protected List<String> otpSupportedApplications;
+    protected Map<String, Map<String, String>> localizationTexts;
 
     // WebAuthn 2-factor properties below
 
@@ -136,6 +142,7 @@ public class RealmRepresentation {
     protected Integer webAuthnPolicyCreateTimeout;
     protected Boolean webAuthnPolicyAvoidSameAuthenticatorRegister;
     protected List<String> webAuthnPolicyAcceptableAaguids;
+    protected List<String> webAuthnPolicyExtraOrigins;
 
     // WebAuthn passwordless properties below
 
@@ -149,13 +156,17 @@ public class RealmRepresentation {
     protected Integer webAuthnPolicyPasswordlessCreateTimeout;
     protected Boolean webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister;
     protected List<String> webAuthnPolicyPasswordlessAcceptableAaguids;
+    protected List<String> webAuthnPolicyPasswordlessExtraOrigins;
+    protected Boolean webAuthnPolicyPasswordlessPasskeysEnabled;
 
     // Client Policies/Profiles
 
     @JsonProperty("clientProfiles")
+    @Schema(implementation = ClientProfilesRepresentation.class)
     protected JsonNode clientProfiles;
 
     @JsonProperty("clientPolicies")
+    @Schema(implementation = ClientPoliciesRepresentation.class)
     protected JsonNode clientPolicies;
 
     protected List<UserRepresentation> users;
@@ -174,15 +185,15 @@ public class RealmRepresentation {
     protected String accountTheme;
     protected String adminTheme;
     protected String emailTheme;
-    
+
     protected Boolean eventsEnabled;
     protected Long eventsExpiration;
     protected List<String> eventsListeners;
     protected List<String> enabledEventTypes;
-    
+
     protected Boolean adminEventsEnabled;
     protected Boolean adminEventsDetailsEnabled;
-    
+
     private List<IdentityProviderRepresentation> identityProviders;
     private List<IdentityProviderMapperRepresentation> identityProviderMappers;
     private List<ProtocolMapperRepresentation> protocolMappers;
@@ -199,12 +210,20 @@ public class RealmRepresentation {
     protected String resetCredentialsFlow;
     protected String clientAuthenticationFlow;
     protected String dockerAuthenticationFlow;
+    protected String firstBrokerLoginFlow;
 
     protected Map<String, String> attributes;
 
     protected String keycloakVersion;
 
     protected Boolean userManagedAccessAllowed;
+
+    protected Boolean organizationsEnabled;
+    private List<OrganizationRepresentation> organizations;
+
+    protected Boolean verifiableCredentialsEnabled;
+
+    protected Boolean adminPermissionsEnabled;
 
     @Deprecated
     protected Boolean social;
@@ -499,6 +518,7 @@ public class RealmRepresentation {
         this.oauth2DeviceCodeLifespan = oauth2DeviceCodeLifespan;
     }
 
+    @Schema(name = "oauth2DeviceCodeLifespan")
     public Integer getOAuth2DeviceCodeLifespan() {
         return oauth2DeviceCodeLifespan;
     }
@@ -507,6 +527,7 @@ public class RealmRepresentation {
         this.oauth2DevicePollingInterval = oauth2DevicePollingInterval;
     }
 
+    @Schema(name = "oauth2DevicePollingInterval")
     public Integer getOAuth2DevicePollingInterval() {
         return oauth2DevicePollingInterval;
     }
@@ -535,6 +556,14 @@ public class RealmRepresentation {
 
     public void setDefaultRole(RoleRepresentation defaultRole) {
         this.defaultRole = defaultRole;
+    }
+
+    public ClientRepresentation getAdminPermissionsClient() {
+        return adminPermissionsClient;
+    }
+
+    public void setAdminPermissionsClient(ClientRepresentation adminPermissionsClient) {
+        this.adminPermissionsClient = adminPermissionsClient;
     }
 
     public List<String> getDefaultGroups() {
@@ -612,7 +641,7 @@ public class RealmRepresentation {
     public void setVerifyEmail(Boolean verifyEmail) {
         this.verifyEmail = verifyEmail;
     }
-    
+
     public Boolean isLoginWithEmailAllowed() {
         return loginWithEmailAllowed;
     }
@@ -620,7 +649,7 @@ public class RealmRepresentation {
     public void setLoginWithEmailAllowed(Boolean loginWithEmailAllowed) {
         this.loginWithEmailAllowed = loginWithEmailAllowed;
     }
-    
+
     public Boolean isDuplicateEmailsAllowed() {
         return duplicateEmailsAllowed;
     }
@@ -758,6 +787,22 @@ public class RealmRepresentation {
         this.permanentLockout = permanentLockout;
     }
 
+    public Integer getMaxTemporaryLockouts() {
+        return maxTemporaryLockouts;
+    }
+
+    public void setMaxTemporaryLockouts(Integer maxTemporaryLockouts) {
+        this.maxTemporaryLockouts = maxTemporaryLockouts;
+    }
+
+    public BruteForceStrategy getBruteForceStrategy() {
+        return this.bruteForceStrategy;
+    }
+
+    public void setBruteForceStrategy(BruteForceStrategy bruteForceStrategy) {
+        this.bruteForceStrategy = bruteForceStrategy;
+    }
+
     public Integer getMaxFailureWaitSeconds() {
         return maxFailureWaitSeconds;
     }
@@ -829,7 +874,7 @@ public class RealmRepresentation {
     public void setEventsListeners(List<String> eventsListeners) {
         this.eventsListeners = eventsListeners;
     }
-    
+
     public List<String> getEnabledEventTypes() {
         return enabledEventTypes;
     }
@@ -1025,6 +1070,14 @@ public class RealmRepresentation {
         this.otpSupportedApplications = otpSupportedApplications;
     }
 
+    public Map<String, Map<String, String>> getLocalizationTexts() {
+        return localizationTexts;
+    }
+
+    public void setLocalizationTexts(Map<String, Map<String, String>> localizationTexts) {
+        this.localizationTexts = localizationTexts;
+    }
+
     public Boolean isOtpPolicyCodeReusable() {
         return otpPolicyCodeReusable;
     }
@@ -1115,6 +1168,14 @@ public class RealmRepresentation {
         this.webAuthnPolicyAcceptableAaguids = webAuthnPolicyAcceptableAaguids;
     }
 
+    public List<String> getWebAuthnPolicyExtraOrigins(){
+        return webAuthnPolicyExtraOrigins;
+    }
+
+    public void setWebAuthnPolicyExtraOrigins(List<String> extraOrigins) {
+        this.webAuthnPolicyExtraOrigins = extraOrigins;
+    }
+
     // WebAuthn passwordless properties below
 
 
@@ -1196,6 +1257,22 @@ public class RealmRepresentation {
 
     public void setWebAuthnPolicyPasswordlessAcceptableAaguids(List<String> webAuthnPolicyPasswordlessAcceptableAaguids) {
         this.webAuthnPolicyPasswordlessAcceptableAaguids = webAuthnPolicyPasswordlessAcceptableAaguids;
+    }
+
+    public List<String> getWebAuthnPolicyPasswordlessExtraOrigins(){
+        return webAuthnPolicyPasswordlessExtraOrigins;
+    }
+
+    public void setWebAuthnPolicyPasswordlessExtraOrigins(List<String> extraOrigins) {
+        this.webAuthnPolicyPasswordlessExtraOrigins = extraOrigins;
+    }
+
+    public Boolean getWebAuthnPolicyPasswordlessPasskeysEnabled(){
+        return webAuthnPolicyPasswordlessPasskeysEnabled;
+    }
+
+    public void setWebAuthnPolicyPasswordlessPasskeysEnabled(Boolean webAuthnPolicyPasswordlessPasskeysEnabled) {
+        this.webAuthnPolicyPasswordlessPasskeysEnabled = webAuthnPolicyPasswordlessPasskeysEnabled;
     }
 
     // Client Policies/Profiles
@@ -1289,6 +1366,15 @@ public class RealmRepresentation {
         return this;
     }
 
+    public String getFirstBrokerLoginFlow() {
+        return firstBrokerLoginFlow;
+    }
+
+    public RealmRepresentation setFirstBrokerLoginFlow(String firstBrokerLoginFlow) {
+        this.firstBrokerLoginFlow = firstBrokerLoginFlow;
+        return this;
+    }
+
     public String getKeycloakVersion() {
         return keycloakVersion;
     }
@@ -1371,8 +1457,51 @@ public class RealmRepresentation {
         return userManagedAccessAllowed;
     }
 
+    public Boolean isOrganizationsEnabled() {
+        return organizationsEnabled;
+    }
+
+    public void setOrganizationsEnabled(Boolean organizationsEnabled) {
+        this.organizationsEnabled = organizationsEnabled;
+    }
+
+    public Boolean isAdminPermissionsEnabled() {
+        return adminPermissionsEnabled;
+    }
+
+    public void setAdminPermissionsEnabled(Boolean adminPermissionsEnabled) {
+        this.adminPermissionsEnabled = adminPermissionsEnabled;
+    }
+
+    public Boolean isVerifiableCredentialsEnabled() {
+        return verifiableCredentialsEnabled;
+    }
+
+    public void setVerifiableCredentialsEnabled(Boolean verifiableCredentialsEnabled) {
+        this.verifiableCredentialsEnabled = verifiableCredentialsEnabled;
+    }
+
     @JsonIgnore
     public Map<String, String> getAttributesOrEmpty() {
         return (Map<String, String>) (attributes == null ? Collections.emptyMap() : attributes);
+    }
+
+    public List<OrganizationRepresentation> getOrganizations() {
+        return organizations;
+    }
+
+    public void setOrganizations(List<OrganizationRepresentation> organizations) {
+        this.organizations = organizations;
+    }
+
+    public void addOrganization(OrganizationRepresentation org) {
+        if (organizations == null) {
+            organizations = new ArrayList<>();
+        }
+        organizations.add(org);
+    }
+
+    public enum BruteForceStrategy {
+        LINEAR, MULTIPLE;
     }
 }

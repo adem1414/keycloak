@@ -2,17 +2,21 @@ package org.keycloak.testsuite.broker;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.not;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.keycloak.testsuite.broker.BrokerTestConstants.IDP_OIDC_ALIAS;
 import static org.keycloak.testsuite.broker.BrokerTestConstants.IDP_OIDC_PROVIDER_ID;
 import static org.keycloak.testsuite.broker.BrokerTestTools.createIdentityProvider;
 import static org.keycloak.testsuite.broker.BrokerTestTools.waitForPage;
-import static org.keycloak.testsuite.broker.BrokerTestTools.getConsumerRoot;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
+import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.resource.UsersResource;
 import org.keycloak.models.IdentityProviderSyncMode;
+import org.keycloak.protocol.oidc.OIDCLoginProtocol;
 import org.keycloak.representations.idm.IdentityProviderRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.testsuite.Assert;
@@ -36,16 +40,25 @@ public class KcOidcBrokerParameterForwardTest extends AbstractBrokerTest {
             IdentityProviderRepresentation idp = createIdentityProvider(IDP_OIDC_ALIAS, IDP_OIDC_PROVIDER_ID);
             Map<String, String> config = idp.getConfig();
             applyDefaultConfiguration(config, syncMode);
-            config.put("forwardParameters", FORWARDED_PARAMETER +", " + PARAMETER_NOT_SET);
+            config.put("forwardParameters", FORWARDED_PARAMETER +", " + PARAMETER_NOT_SET + ", " + OAuth2Constants.ACR_VALUES + ", " + OIDCLoginProtocol.CLAIMS_PARAM + ",forwarded_encoded");
             return idp;
         }
     }
 
     @Override
     protected void loginUser() {
-        driver.navigate().to(getAccountUrl(getConsumerRoot(), bc.consumerRealmName()));
+        oauth.clientId("broker-app");
+        loginPage.open(bc.consumerRealmName());
 
-        String queryString = "&" + FORWARDED_PARAMETER + "=" + FORWARDED_PARAMETER_VALUE + "&" + PARAMETER_NOT_FORWARDED + "=" + "value";
+        String claimsValue = "{\"userinfo\":{\"http://itsme.services/v2/claim/BENationalNumber\":null}}";
+        String urlEncodedClaims = URLEncoder.encode(claimsValue, StandardCharsets.UTF_8);
+        String forwardedEncodedParam = "forwarded_encoded";
+        String forwardedEncodedParamValue = "encoded value";
+        String forwardedEncodedParamvalueEncoded = URLEncoder.encode(forwardedEncodedParamValue, StandardCharsets.UTF_8);
+        String queryString = "&" + FORWARDED_PARAMETER + "=" + FORWARDED_PARAMETER_VALUE + "&" + PARAMETER_NOT_FORWARDED + "=" + "value"
+                + "&" + OAuth2Constants.ACR_VALUES + "=" + "phr"
+                + "&" + OIDCLoginProtocol.CLAIMS_PARAM + "=" + urlEncodedClaims
+                + "&" + forwardedEncodedParam + "=" + forwardedEncodedParamValue;
         driver.navigate().to(driver.getCurrentUrl() + queryString);
 
         log.debug("Clicking social " + bc.getIDPAlias());
@@ -53,16 +66,21 @@ public class KcOidcBrokerParameterForwardTest extends AbstractBrokerTest {
 
         waitForPage(driver, "sign in to", true);
 
-        Assert.assertThat("Driver should be on the provider realm page right now",
+        assertThat("Driver should be on the provider realm page right now",
                 driver.getCurrentUrl(), containsString("/auth/realms/" + bc.providerRealmName() + "/"));
 
-        Assert.assertThat(FORWARDED_PARAMETER + "=" + FORWARDED_PARAMETER_VALUE + " should be part of the url",
+        assertThat(FORWARDED_PARAMETER + "=" + FORWARDED_PARAMETER_VALUE + " should be part of the url",
                 driver.getCurrentUrl(), containsString(FORWARDED_PARAMETER + "=" + FORWARDED_PARAMETER_VALUE));
-
-        Assert.assertThat("\"" + PARAMETER_NOT_SET + "\"" + " should NOT be part of the url",
+        assertThat(OAuth2Constants.ACR_VALUES + "=" + "phr" + " should be part of the url",
+                driver.getCurrentUrl(), containsString(OAuth2Constants.ACR_VALUES + "=" + "phr"));
+        assertThat(OIDCLoginProtocol.CLAIMS_PARAM + "=" + urlEncodedClaims + " should be part of the url",
+                driver.getCurrentUrl(), containsString(OIDCLoginProtocol.CLAIMS_PARAM + "=" + urlEncodedClaims));
+        assertThat(forwardedEncodedParam + "=" + forwardedEncodedParamValue +  "should be part of the url",
+                driver.getCurrentUrl(), containsString(forwardedEncodedParam + "=" + URLEncoder.encode(forwardedEncodedParamvalueEncoded, StandardCharsets.UTF_8)));
+        assertThat("\"" + PARAMETER_NOT_SET + "\"" + " should NOT be part of the url",
                 driver.getCurrentUrl(), not(containsString(PARAMETER_NOT_SET)));
 
-        Assert.assertThat("\"" + PARAMETER_NOT_FORWARDED +"\"" + " should be NOT part of the url",
+        assertThat("\"" + PARAMETER_NOT_FORWARDED +"\"" + " should be NOT part of the url",
                 driver.getCurrentUrl(), not(containsString(PARAMETER_NOT_FORWARDED)));
 
         loginPage.login(bc.getUserLogin(), bc.getUserPassword());
@@ -70,7 +88,7 @@ public class KcOidcBrokerParameterForwardTest extends AbstractBrokerTest {
 
         updateAccountInformationPage.assertCurrent();
 
-        Assert.assertThat("We must be on correct realm right now",
+        assertThat("We must be on correct realm right now",
                 driver.getCurrentUrl(), containsString("/auth/realms/" + bc.consumerRealmName() + "/"));
 
         log.debug("Updating info on updateAccount page");

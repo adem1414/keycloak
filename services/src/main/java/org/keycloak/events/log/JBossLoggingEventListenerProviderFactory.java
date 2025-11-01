@@ -40,16 +40,27 @@ public class JBossLoggingEventListenerProviderFactory implements EventListenerPr
 
     private Logger.Level successLevel;
     private Logger.Level errorLevel;
+    private boolean sanitize;
+    private Character quotes;
+    private boolean includeRepresentation;
 
     @Override
     public EventListenerProvider create(KeycloakSession session) {
-        return new JBossLoggingEventListenerProvider(session, logger, successLevel, errorLevel);
+        return new JBossLoggingEventListenerProvider(session, logger, successLevel, errorLevel, quotes, sanitize, includeRepresentation);
     }
 
     @Override
     public void init(Config.Scope config) {
         successLevel = Logger.Level.valueOf(config.get("success-level", "debug").toUpperCase());
         errorLevel = Logger.Level.valueOf(config.get("error-level", "warn").toUpperCase());
+        sanitize = config.getBoolean("sanitize", true);
+        String quotesString = config.get("quotes", "\"");
+        if (!quotesString.equals("none") && quotesString.length() > 1) {
+            logger.warn("Invalid quotes configuration, it should be none or one character to use as quotes. Using default \" quotes");
+            quotesString = "\"";
+        }
+        quotes = quotesString.equals("none")? null : quotesString.charAt(0);
+        includeRepresentation = config.getBoolean("include-representation", false);
     }
 
     @Override
@@ -87,6 +98,27 @@ public class JBossLoggingEventListenerProviderFactory implements EventListenerPr
                 .helpText("The log level for error messages.")
                 .options(logLevels)
                 .defaultValue("warn")
+                .add()
+                .property()
+                .name("sanitize")
+                .type("boolean")
+                .helpText("If true the log messages are sanitized to avoid line breaks. If false messages are not sanitized.")
+                .defaultValue("true")
+                .add()
+                .property()
+                .name("quotes")
+                .type("string")
+                .helpText("The quotes to use for values, it should be one character like \" or '. Use \"none\" if quotes are not needed.")
+                .defaultValue("\"")
+                .add()
+                .property()
+                .name("include-representation")
+                .type("boolean")
+                .helpText("""
+                          When "true" the "representation" field with the JSON admin object is also added to the message.
+                          The realm should be also configured to include representation for the admin events.
+                          """)
+                .defaultValue("false")
                 .add()
                 .build();
     }

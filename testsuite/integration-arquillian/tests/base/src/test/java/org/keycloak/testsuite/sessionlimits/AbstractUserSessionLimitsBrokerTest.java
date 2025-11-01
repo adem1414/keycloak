@@ -16,25 +16,25 @@ import static org.keycloak.testsuite.sessionlimits.UserSessionLimitsUtil.ERROR_T
 
 public abstract class AbstractUserSessionLimitsBrokerTest extends AbstractInitializedBaseBrokerTest {
     @Test
-    public void testSessionCountExceededAndNewSessionDeniedFirstBrokerLoginFlow() throws Exception {
+    public void testSessionCountExceededAndNewSessionDeniedFirstBrokerLoginFlow() {
         configureFlow(UserSessionLimitsAuthenticatorFactory.DENY_NEW_SESSION, "0", "1");
         loginTwiceAndVerifyBehavior(UserSessionLimitsAuthenticatorFactory.DENY_NEW_SESSION);
     }
 
     @Test
-    public void testSessionCountExceededAndOldestSessionRemovedFirstBrokerLoginFlow() throws Exception {
+    public void testSessionCountExceededAndOldestSessionRemovedFirstBrokerLoginFlow() {
         configureFlow(UserSessionLimitsAuthenticatorFactory.TERMINATE_OLDEST_SESSION, "0", "1");
         loginTwiceAndVerifyBehavior(UserSessionLimitsAuthenticatorFactory.TERMINATE_OLDEST_SESSION);
     }
 
     @Test
-    public void testRealmSessionCountExceededAndNewSessionDeniedFirstBrokerLoginFlow() throws Exception {
+    public void testRealmSessionCountExceededAndNewSessionDeniedFirstBrokerLoginFlow() {
         configureFlow(UserSessionLimitsAuthenticatorFactory.DENY_NEW_SESSION, "1", "0");
         loginTwiceAndVerifyBehavior(UserSessionLimitsAuthenticatorFactory.DENY_NEW_SESSION);
     }
 
     @Test
-    public void testRealmSessionCountExceededAndOldestFirstBrokerLoginFlow() throws Exception {
+    public void testRealmSessionCountExceededAndOldestFirstBrokerLoginFlow() {
         configureFlow(UserSessionLimitsAuthenticatorFactory.TERMINATE_OLDEST_SESSION, "1", "0");
         loginTwiceAndVerifyBehavior(UserSessionLimitsAuthenticatorFactory.TERMINATE_OLDEST_SESSION);
     }
@@ -45,6 +45,7 @@ public abstract class AbstractUserSessionLimitsBrokerTest extends AbstractInitia
         String idpAlias = bc.getIDPAlias();
         testingClient.server().run(session -> {
             RealmModel realm = session.realms().getRealmByName(realmName);
+            session.getContext().setRealm(realm);
             AuthenticationFlowModel postBrokerFlow = new AuthenticationFlowModel();
             postBrokerFlow.setAlias("post-broker");
             postBrokerFlow.setDescription("post-broker flow with session limits");
@@ -55,15 +56,14 @@ public abstract class AbstractUserSessionLimitsBrokerTest extends AbstractInitia
 
             configureSessionLimits(realm, postBrokerFlow, behavior, realmLimit, clientLimit);
 
-            IdentityProviderModel idp = realm.getIdentityProviderByAlias(idpAlias);
+            IdentityProviderModel idp = session.identityProviders().getByAlias(idpAlias);
             idp.setPostBrokerLoginFlowId(postBrokerFlow.getId());
-            realm.updateIdentityProvider(idp);
+            session.identityProviders().update(idp);
         });
     }
 
     private void loginTwiceAndVerifyBehavior(String behavior) {
         logInAsUserInIDPForFirstTime();
-        assertLoggedInAccountManagement();
 
         deleteAllCookiesForRealm(bc.consumerRealmName());
         deleteAllCookiesForRealm(bc.providerRealmName());
@@ -71,7 +71,7 @@ public abstract class AbstractUserSessionLimitsBrokerTest extends AbstractInitia
         logInAsUserInIDP();
 
         if (UserSessionLimitsAuthenticatorFactory.TERMINATE_OLDEST_SESSION.equals(behavior)) {
-            assertLoggedInAccountManagement();
+            appPage.assertCurrent();
             testingClient.server(bc.consumerRealmName()).run(assertSessionCount(bc.consumerRealmName(), bc.getUserLogin(), 1));
         }
         else if (UserSessionLimitsAuthenticatorFactory.DENY_NEW_SESSION.equals(behavior)) {

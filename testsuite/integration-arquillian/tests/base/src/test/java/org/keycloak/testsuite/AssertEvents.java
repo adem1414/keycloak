@@ -27,8 +27,13 @@ import org.junit.rules.TestRule;
 import org.junit.runners.model.Statement;
 import org.keycloak.OAuth2Constants;
 import org.keycloak.authentication.authenticators.client.ClientIdAndSecretAuthenticator;
+import org.keycloak.common.util.Time;
 import org.keycloak.events.Details;
 import org.keycloak.events.EventType;
+import org.keycloak.protocol.oidc.grants.AuthorizationCodeGrantTypeFactory;
+import org.keycloak.protocol.oidc.grants.RefreshTokenGrantTypeFactory;
+import org.keycloak.protocol.oidc.grants.ciba.CibaGrantTypeFactory;
+import org.keycloak.protocol.oidc.grants.device.DeviceGrantTypeFactory;
 import org.keycloak.representations.idm.ClientRepresentation;
 import org.keycloak.representations.idm.EventRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
@@ -38,9 +43,15 @@ import org.keycloak.util.TokenUtil;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
+
+import static org.hamcrest.Matchers.emptyOrNullString;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.keycloak.testsuite.util.ServerURLs.getAuthServerContextRoot;
 
 /**
@@ -77,7 +88,11 @@ public class AssertEvents implements TestRule {
     }
 
     public EventRepresentation poll() {
-        EventRepresentation event = fetchNextEvent();
+        return poll(0);
+    }
+
+    public EventRepresentation poll(int seconds) {
+        EventRepresentation event = fetchNextEvent(seconds);
         Assert.assertNotNull("Event expected", event);
 
         return event;
@@ -93,7 +108,7 @@ public class AssertEvents implements TestRule {
     }
 
     public ExpectedEvent expectRequiredAction(EventType event) {
-        return expectLogin().event(event).removeDetail(Details.CONSENT).session(Matchers.isEmptyOrNullString());
+        return expectLogin().event(event).removeDetail(Details.CONSENT).session(is(emptyOrNullString()));
     }
 
     public ExpectedEvent expectLogin() {
@@ -104,7 +119,7 @@ public class AssertEvents implements TestRule {
                 //.detail(Details.AUTH_TYPE, AuthorizationEndpoint.CODE_AUTH_TYPE)
                 .detail(Details.REDIRECT_URI, Matchers.equalTo(DEFAULT_REDIRECT_URI))
                 .detail(Details.CONSENT, Details.CONSENT_VALUE_NO_CONSENT_REQUIRED)
-                .session(isUUID());
+                .session(isSessionId());
     }
 
     public ExpectedEvent expectClientLogin() {
@@ -113,7 +128,7 @@ public class AssertEvents implements TestRule {
                 .detail(Details.CLIENT_AUTH_METHOD, ClientIdAndSecretAuthenticator.PROVIDER_ID)
                 .detail(Details.GRANT_TYPE, OAuth2Constants.CLIENT_CREDENTIALS)
                 .removeDetail(Details.CODE_ID)
-                .session(isUUID());
+                .session(isSessionId());
     }
 
     public ExpectedEvent expectSocialLogin() {
@@ -122,14 +137,14 @@ public class AssertEvents implements TestRule {
                 .detail(Details.USERNAME, DEFAULT_USERNAME)
                 .detail(Details.AUTH_METHOD, "form")
                 .detail(Details.REDIRECT_URI, Matchers.equalTo(DEFAULT_REDIRECT_URI))
-                .session(isUUID());
+                .session(isSessionId());
     }
 
     public ExpectedEvent expectCodeToToken(String codeId, String sessionId) {
         return expect(EventType.CODE_TO_TOKEN)
                 .detail(Details.CODE_ID, codeId)
-                .detail(Details.TOKEN_ID, isUUID())
-                .detail(Details.REFRESH_TOKEN_ID, isUUID())
+                .detail(Details.TOKEN_ID, isAccessTokenId(AuthorizationCodeGrantTypeFactory.GRANT_SHORTCUT))
+                .detail(Details.REFRESH_TOKEN_ID, isTokenId())
                 .detail(Details.REFRESH_TOKEN_TYPE, TokenUtil.TOKEN_TYPE_REFRESH)
                 .detail(Details.CLIENT_AUTH_METHOD, ClientIdAndSecretAuthenticator.PROVIDER_ID)
                 .session(sessionId);
@@ -139,7 +154,7 @@ public class AssertEvents implements TestRule {
         return expect(EventType.OAUTH2_DEVICE_VERIFY_USER_CODE)
                 .user((String) null)
                 .client(clientId)
-                .detail(Details.CODE_ID, isUUID());
+                .detail(Details.CODE_ID, isCodeId());
     }
 
     public ExpectedEvent expectDeviceLogin(String clientId, String codeId, String userId) {
@@ -156,8 +171,8 @@ public class AssertEvents implements TestRule {
                 .client(clientId)
                 .user(userId)
                 .detail(Details.CODE_ID, codeId)
-                .detail(Details.TOKEN_ID, isUUID())
-                .detail(Details.REFRESH_TOKEN_ID, isUUID())
+                .detail(Details.TOKEN_ID, isAccessTokenId(DeviceGrantTypeFactory.GRANT_SHORTCUT))
+                .detail(Details.REFRESH_TOKEN_ID, isTokenId())
                 .detail(Details.REFRESH_TOKEN_TYPE, TokenUtil.TOKEN_TYPE_REFRESH)
                 .detail(Details.CLIENT_AUTH_METHOD, ClientIdAndSecretAuthenticator.PROVIDER_ID)
                 .session(codeId);
@@ -165,16 +180,16 @@ public class AssertEvents implements TestRule {
 
     public ExpectedEvent expectRefresh(String refreshTokenId, String sessionId) {
         return expect(EventType.REFRESH_TOKEN)
-                .detail(Details.TOKEN_ID, isUUID())
+                .detail(Details.TOKEN_ID, isAccessTokenId(RefreshTokenGrantTypeFactory.GRANT_SHORTCUT))
                 .detail(Details.REFRESH_TOKEN_ID, refreshTokenId)
                 .detail(Details.REFRESH_TOKEN_TYPE, TokenUtil.TOKEN_TYPE_REFRESH)
-                .detail(Details.UPDATED_REFRESH_TOKEN_ID, isUUID())
+                .detail(Details.UPDATED_REFRESH_TOKEN_ID, isTokenId())
                 .detail(Details.CLIENT_AUTH_METHOD, ClientIdAndSecretAuthenticator.PROVIDER_ID)
                 .session(sessionId);
     }
 
     public ExpectedEvent expectLogout(String sessionId) {
-        return expect(EventType.LOGOUT).client((String) null)
+        return expect(EventType.LOGOUT)
                 .detail(Details.REDIRECT_URI, Matchers.equalTo(DEFAULT_REDIRECT_URI))
                 .session(sessionId);
     }
@@ -189,7 +204,7 @@ public class AssertEvents implements TestRule {
     public ExpectedEvent expectRegister(String username, String email) {
         return expectRegister(username, email, DEFAULT_CLIENT_ID);
     }
-    
+
     public ExpectedEvent expectRegister(String username, String email, String clientId) {
         UserRepresentation user = username != null ? getUser(username) : null;
         return expect(EventType.REGISTER)
@@ -199,6 +214,15 @@ public class AssertEvents implements TestRule {
                 .detail(Details.EMAIL, email)
                 .detail(Details.REGISTER_METHOD, "form")
                 .detail(Details.REDIRECT_URI, Matchers.equalTo(DEFAULT_REDIRECT_URI));
+    }
+
+    public ExpectedEvent expectIdentityProviderFirstLogin(RealmRepresentation realm, String identityProvider, String idpUsername) {
+        return expect(EventType.IDENTITY_PROVIDER_FIRST_LOGIN)
+                .client("broker-app")
+                .realm(realm)
+                .user((String)null)
+                .detail(Details.IDENTITY_PROVIDER, identityProvider)
+                .detail(Details.IDENTITY_PROVIDER_USERNAME, idpUsername);
     }
 
     public ExpectedEvent expectRegisterError(String username, String email) {
@@ -218,11 +242,19 @@ public class AssertEvents implements TestRule {
     public ExpectedEvent expectAuthReqIdToToken(String codeId, String sessionId) {
         return expect(EventType.AUTHREQID_TO_TOKEN)
                 .detail(Details.CODE_ID, codeId)
-                .detail(Details.TOKEN_ID, isUUID())
-                .detail(Details.REFRESH_TOKEN_ID, isUUID())
+                .detail(Details.TOKEN_ID, isAccessTokenId(CibaGrantTypeFactory.GRANT_SHORTCUT))
+                .detail(Details.REFRESH_TOKEN_ID, isTokenId())
                 .detail(Details.REFRESH_TOKEN_TYPE, TokenUtil.TOKEN_TYPE_REFRESH)
                 .detail(Details.CLIENT_AUTH_METHOD, ClientIdAndSecretAuthenticator.PROVIDER_ID)
-                .session(isUUID());
+                .session(isSessionId());
+    }
+
+    public ExpectedEvent expectClientPolicyError(EventType eventType, String error, String reason, String clientPolicyError, String clientPolicyErrorDetail) {
+        return expect(eventType)
+                .error(error)
+                .detail(Details.REASON, reason)
+                .detail(Details.CLIENT_POLICY_ERROR, clientPolicyError)
+                .detail(Details.CLIENT_POLICY_ERROR_DETAIL, clientPolicyErrorDetail);
     }
 
     public ExpectedEvent expect(EventType event) {
@@ -356,20 +388,56 @@ public class AssertEvents implements TestRule {
         }
 
         public EventRepresentation assertEvent() {
-            return assertEvent(poll());
+            return assertEvent(false, 0);
+        }
+
+        public EventRepresentation assertEvent(boolean ignorePreviousEvents) {
+            return assertEvent(ignorePreviousEvents, 0);
+        }
+
+        /**
+         * Assert the expected event was sent to the listener by Keycloak server. Returns this event.
+         *
+         * @param ignorePreviousEvents if true, test will ignore all the events, which were already present. Test will poll the events from the queue until it finds the event of expected type
+         * @param seconds The seconds to wait for the next event to come
+         * @return the expected event
+         */
+        public EventRepresentation assertEvent(boolean ignorePreviousEvents, int seconds) {
+            if (expected.getError() != null && ! expected.getType().endsWith("_ERROR")) {
+                expected.setType(expected.getType() + "_ERROR");
+            }
+
+            if (ignorePreviousEvents) {
+                // Consider 25 as a "limit" for maximum number of events in the queue for now
+                List<String> presentedEventTypes = new LinkedList<>();
+                for (int i = 0 ; i < 25 ; i++) {
+                    EventRepresentation event = fetchNextEvent(seconds);
+                    if (event != null) {
+                        if (expected.getType().equals(event.getType())) {
+                            return assertEvent(event);
+                        } else {
+                            presentedEventTypes.add(event.getType());
+                        }
+                    }
+                }
+                Assert.fail("Did not find the event of expected type " + expected.getType() +". Events present: " + presentedEventTypes);
+                return null; // Unreachable code
+            } else {
+                return assertEvent(poll(seconds));
+            }
         }
 
         public EventRepresentation assertEvent(EventRepresentation actual) {
-            if (expected.getError() != null && ! expected.getType().toString().endsWith("_ERROR")) {
+            if (expected.getError() != null && ! expected.getType().endsWith("_ERROR")) {
                 expected.setType(expected.getType() + "_ERROR");
             }
-            Assert.assertThat("type", actual.getType(), is(expected.getType()));
-            Assert.assertThat("realm ID", actual.getRealmId(), is(realmId));
-            Assert.assertThat("client ID", actual.getClientId(), is(expected.getClientId()));
-            Assert.assertThat("error", actual.getError(), is(expected.getError()));
-            Assert.assertThat("ip address", actual.getIpAddress(), ipAddress);
-            Assert.assertThat("user ID", actual.getUserId(), is(userId));
-            Assert.assertThat("session ID", actual.getSessionId(), is(sessionId));
+            assertThat("type", actual.getType(), is(expected.getType()));
+            assertThat("realm ID", actual.getRealmId(), is(realmId));
+            assertThat("client ID", actual.getClientId(), is(expected.getClientId()));
+            assertThat("error", actual.getError(), is(expected.getError()));
+            assertThat("ip address", actual.getIpAddress(), ipAddress);
+            assertThat("user ID", actual.getUserId(), is(userId));
+            assertThat("session ID", actual.getSessionId(), is(sessionId));
 
             if (details == null || details.isEmpty()) {
 //                Assert.assertNull(actual.getDetails());
@@ -377,11 +445,8 @@ public class AssertEvents implements TestRule {
                 Assert.assertNotNull(actual.getDetails());
                 for (Map.Entry<String, Matcher<? super String>> d : details.entrySet()) {
                     String actualValue = actual.getDetails().get(d.getKey());
-                    if (!actual.getDetails().containsKey(d.getKey())) {
-                        Assert.fail(d.getKey() + " missing");
-                    }
 
-                    Assert.assertThat("Unexpected value for " + d.getKey(), actualValue, is(d.getValue()));
+                    assertThat("Unexpected value for " + d.getKey(), actualValue, d.getValue());
                 }
                 /*
                 for (String k : actual.getDetails().keySet()) {
@@ -394,10 +459,42 @@ public class AssertEvents implements TestRule {
 
             return actual;
         }
+
+        @Override
+        public String toString() {
+            return this.getClass().getSimpleName() + ":" + expected.getType();
+        }
     }
 
     public static Matcher<String> isCodeId() {
-        return isUUID();
+        // Make the tests pass with the old and the new encoding of code IDs
+        return Matchers.anyOf(isBase64WithAtLeast128Bits(), isUUID());
+    }
+
+    public static Matcher<String> isSessionId() {
+        // Make the tests pass with the old and the new encoding of sessions
+        return Matchers.anyOf(isBase64WithAtLeast128Bits(), isUUID());
+    }
+
+    public static Matcher<String> isTokenId() {
+        // Make the tests pass with the old and the new encoding of token IDs
+        return Matchers.anyOf(isBase64WithAtLeast128Bits(), isUUID());
+    }
+
+    public static Matcher<String> isBase64WithAtLeast128Bits() {
+        return new TypeSafeMatcher<>() {
+            private static final Pattern BASE64 = Pattern.compile("[-A-Za-z0-9+/_]*");
+
+            @Override
+            protected boolean matchesSafely(String item) {
+                return item.length() >= 24 && item.matches(BASE64.pattern());
+            }
+
+            @Override
+            public void describeTo(Description description) {
+                description.appendText("not an base64 ID with at least 128bits");
+            }
+        };
     }
 
     public static Matcher<String> isUUID() {
@@ -410,6 +507,24 @@ public class AssertEvents implements TestRule {
             @Override
             public void describeTo(Description description) {
                 description.appendText("Not an UUID");
+            }
+        };
+    }
+
+    public static Matcher<String> isAccessTokenId(String expectedGrantShortcut) {
+        return new TypeSafeMatcher<String>() {
+            @Override
+            protected boolean matchesSafely(String item) {
+                String[] items = item.split(":");
+                if (items.length != 2) return false;
+                // Grant type shortcut starts at character 4th char and is 2-chars long
+                if (items[0].substring(3, 5).equals(expectedGrantShortcut)) return false;
+                return isTokenId().matches(items[1]);
+            }
+
+            @Override
+            public void describeTo(Description description) {
+                description.appendText("Not a Token ID with expected grant: " + expectedGrantShortcut);
             }
         };
     }
@@ -477,5 +592,27 @@ public class AssertEvents implements TestRule {
 
     private EventRepresentation fetchNextEvent() {
         return context.testingClient.testing().pollEvent();
+    }
+
+    private EventRepresentation fetchNextEvent(int seconds) {
+        if (seconds <= 0) {
+            return fetchNextEvent();
+        }
+
+        final long millis = TimeUnit.SECONDS.toMillis(seconds);
+        final long start = Time.currentTimeMillis();
+        do {
+            try {
+                EventRepresentation event = fetchNextEvent();
+                if (event != null) {
+                    return event;
+                }
+                // wait a bit to receive the event
+                TimeUnit.MILLISECONDS.sleep(millis / 10L);
+            } catch (InterruptedException e) {
+                // no-op
+            }
+        } while (Time.currentTimeMillis() - start < millis);
+        return null;
     }
 }
