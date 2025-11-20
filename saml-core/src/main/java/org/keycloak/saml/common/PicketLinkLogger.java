@@ -517,6 +517,12 @@ public interface PicketLinkLogger {
     /** @param string */
     void warn(String message);
 
+    /**
+     * @param message
+     * @param t
+     */
+    void warn(String message, Throwable t);
+
     /** @param message */
     void error(String message);
 

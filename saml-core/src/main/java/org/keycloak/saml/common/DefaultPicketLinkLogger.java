@@ -2067,6 +2067,11 @@ public class DefaultPicketLinkLogger implements PicketLinkLogger {
         logger.warn(message);
     }
 
+    @Override
+    public void warn(String message, Throwable t) {
+        logger.warn(message, t);
+    }
+
     /*
      *(non-Javadoc)
      *

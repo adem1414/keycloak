@@ -60,6 +60,10 @@ import java.util.Objects;
  */
 public class DocumentUtil {
 
+    private DocumentUtil() {
+        // private constructor to prevent instantiation
+    }
+
     private static final PicketLinkLogger logger = PicketLinkLoggerFactory.getLogger();
 
     private static DocumentBuilderFactory documentBuilderFactory;
@@ -259,17 +263,21 @@ public class DocumentUtil {
      * element based on its namespace is made, failing which an element with the localpart ignoring any namespace is
      * returned. </p>
      *
-     * @param doc
+     * @param parent
      * @param elementQName
      *
-     * @return
+     * @return the first matching descendant element, or {@code null} if not found.
+     * @deprecated This method is misleading as it returns a descendant, not necessarily a direct child.
+     * Use {@link #getDirectChildElement(Element, String, String)} for direct children, or consider using
+     * a more specific XPath expression for descendant searching.
      */
-    public static Element getChildElement(Element doc, QName elementQName) {
-        NodeList nl = doc.getElementsByTagNameNS(elementQName.getNamespaceURI(), elementQName.getLocalPart());
+    @Deprecated
+    public static Element getChildElement(Element parent, QName elementQName) {
+        NodeList nl = parent.getElementsByTagNameNS(elementQName.getNamespaceURI(), elementQName.getLocalPart());
         if (nl.getLength() == 0) {
-            nl = doc.getElementsByTagNameNS("*", elementQName.getLocalPart());
+            nl = parent.getElementsByTagNameNS("*", elementQName.getLocalPart());
             if (nl.getLength() == 0)
-                nl = doc.getElementsByTagName(elementQName.getPrefix() + ":" + elementQName.getLocalPart());
+                nl = parent.getElementsByTagName(elementQName.getPrefix() + ":" + elementQName.getLocalPart());
             if (nl.getLength() == 0)
                 return null;
         }
@@ -345,26 +353,11 @@ public class DocumentUtil {
      * @return
      */
     public static String asString(Document doc) {
-        String str = null;
-
         try {
-            str = getDocumentAsString(doc);
-        } catch (Exception ignore) {
-        }
-        return str;
-    }
-
-    private static void visit(Node node, int level) {
-        // Visit each child
-        NodeList list = node.getChildNodes();
-        for (int i = 0; i < list.getLength(); i++) {
-            // Get child node
-            Node childNode = list.item(i);
-
-            logger.trace("Node=" + childNode.getNamespaceURI() + "::" + childNode.getLocalName());
-
-            // Visit child node
-            visit(childNode, level + 1);
+            return getDocumentAsString(doc);
+        } catch (Exception e) {
+            logger.warn("Failed to convert document to string", e);
+            return null;
         }
     }
 
@@ -394,31 +387,36 @@ public class DocumentUtil {
      * @return
      */
     private static DocumentBuilderFactory getDocumentBuilderFactory() {
-        boolean tccl_jaxp = SystemPropertiesUtil.getSystemProperty(GeneralConstants.TCCL_JAXP, "false")
-                .equalsIgnoreCase("true");
-        ClassLoader prevTCCL = SecurityActions.getTCCL();
         if (documentBuilderFactory == null) {
-            try {
-                if (tccl_jaxp) {
-                    SecurityActions.setTCCL(DocumentUtil.class.getClassLoader());
-                }
-                documentBuilderFactory = DocumentBuilderFactory.newInstance();
-                documentBuilderFactory.setNamespaceAware(true);
-                documentBuilderFactory.setXIncludeAware(false);
-                String feature = "";
-                try {
-                    feature = feature_disallow_doctype_decl;
-                    documentBuilderFactory.setFeature(feature, true);
-                    feature = feature_external_general_entities;
-                    documentBuilderFactory.setFeature(feature, false);
-                    feature = feature_external_parameter_entities;
-                    documentBuilderFactory.setFeature(feature, false);
-                } catch (ParserConfigurationException e) {
-                    throw logger.parserFeatureNotSupported(feature);
-                }
-            } finally {
-                if (tccl_jaxp) {
-                    SecurityActions.setTCCL(prevTCCL);
+            synchronized (DocumentUtil.class) {
+                if (documentBuilderFactory == null) {
+                    boolean tccl_jaxp = SystemPropertiesUtil.getSystemProperty(GeneralConstants.TCCL_JAXP, "false")
+                            .equalsIgnoreCase("true");
+                    ClassLoader prevTCCL = SecurityActions.getTCCL();
+                    try {
+                        if (tccl_jaxp) {
+                            SecurityActions.setTCCL(DocumentUtil.class.getClassLoader());
+                        }
+                        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+                        factory.setNamespaceAware(true);
+                        factory.setXIncludeAware(false);
+                        String feature = "";
+                        try {
+                            feature = feature_disallow_doctype_decl;
+                            factory.setFeature(feature, true);
+                            feature = feature_external_general_entities;
+                            factory.setFeature(feature, false);
+                            feature = feature_external_parameter_entities;
+                            factory.setFeature(feature, false);
+                        } catch (ParserConfigurationException e) {
+                            throw logger.parserFeatureNotSupported(feature);
+                        }
+                        documentBuilderFactory = factory;
+                    } finally {
+                        if (tccl_jaxp) {
+                            SecurityActions.setTCCL(prevTCCL);
+                        }
+                    }
                 }
             }
         }
@@ -433,7 +431,6 @@ public class DocumentUtil {
      * @param targetNamespace namespace URI
      * @param targetLocalName local name
      * @return a child element matching the target namespace and localname, where {@linkplain Element#getParentNode()} is the parent input parameter
-     * @return
      */
     
     public static Element getDirectChildElement(Element parent, String targetNamespace, String targetLocalName) {
